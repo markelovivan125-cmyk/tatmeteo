@@ -24,7 +24,6 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 
 .leaflet-container{background:var(--bg)!important}
 .leaflet-control-attribution{display:none}
-/* Скрываем стандартный зум Leaflet для минимализма */
 .leaflet-control-zoom { display: none !important; }
 
 /* ══ Базовый класс Glassmorphism ══ */
@@ -106,7 +105,6 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 .popup-close{font-size:10px;color:var(--text-dim);cursor:pointer;text-align:right;display:block;margin-top:4px}
 .popup-close:hover{color:var(--text)}
 
-/* Кнопки возврата */
 #restore-legend{bottom:90px;right:16px}
 #restore-tl{bottom:16px;left:50%;transform:translateX(-50%)}
 </style>
@@ -293,7 +291,8 @@ function schedRender(){if(!renderPend){renderPend=true;requestAnimationFrame(doR
 function doRender(){renderPend=false;ctx.clearRect(0,0,canvas.width,canvas.height);var tiles=visTiles(),hit=0,miss=0;
 for(var i=0;i<tiles.length;i++){var t=tiles[i],ck=CK(t.x,t.y),c=S.cache.get(ck);
 if(c){var r=tileRect(t.x,t.y);if(r.sw>0&&r.sh>0){
-  ctx.imageSmoothingEnabled = (S.layer === 'radar');
+  /* Убрано размытие/сглаживание (imageSmoothingEnabled всегда false) */
+  ctx.imageSmoothingEnabled = false; 
   ctx.globalAlpha=.8;ctx.drawImage(c,r.sx,r.sy,r.sw,r.sh);ctx.globalAlpha=1;hit++}}else{fetchTile(t.x,t.y);miss++}}
 
 if(S.layer === 'wx'){
