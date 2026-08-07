@@ -222,7 +222,7 @@ var PPAL=[
 ];
 
 var S={ts:0,px:1,layer:'radar',playing:false,timer:null,speedI:0,speeds:[1,2,4],frameI:0,frames:[],
-cache:new Map(),pending:new Set(),failed=new Set(),cacheMax:400,loadN:0,manualTime:false,legendVis:true};
+cache:new Map(),pending:new Set(),failed:new Set(),cacheMax:400,loadN:0,manualTime:false,legendVis:true};
 function nowTs(){return Math.floor((Date.now()/1000-DELAY)/STEP)*STEP}
 function minTs(){return nowTs()-MAX_HISTORY_SEC}
 S.ts=nowTs();
@@ -279,14 +279,9 @@ function processTile(img,layer,px){
   if(n>0){var rgb=getColor(Math.floor(sum/n),layer);if(rgb){oc.fillStyle='rgb('+rgb+')';oc.fillRect(x0,y0,x1-x0,y1-y0)}}}return out}
 
 function bumpLoad(d){S.loadN=Math.max(0,S.loadN+d);$('pulse').classList.toggle('busy',S.loadN>0)}
-
-// Функция загрузки с использованием прокси для обхода CORS
 function fetchTile(x,y){var ck=CK(x,y);if(S.cache.has(ck)||S.pending.has(ck)||S.failed.has(ck))return;
-S.pending.add(ck);bumpLoad(1);
-var rawUrl=SRC+'/'+S.ts+'/'+FZ+'/'+x+'_'+y+'.png';
-var url='https://api.allorigins.win/raw?url='+encodeURIComponent(rawUrl);
-var img=new Image();img.crossOrigin='anonymous';
-var spx=S.px,sl=S.layer,sts=S.ts,tid=setTimeout(function(){S.pending.delete(ck);bumpLoad(-1);S.failed.add(ck)},10000);
+S.pending.add(ck);bumpLoad(1);var url=SRC+'/'+S.ts+'/'+FZ+'/'+x+'_'+y+'.png',img=new Image();img.crossOrigin='anonymous';
+var spx=S.px,sl=S.layer,sts=S.ts,tid=setTimeout(function(){S.pending.delete(ck);bumpLoad(-1);S.failed.add(ck)},8000);
 img.onload=function(){clearTimeout(tid);S.pending.delete(ck);bumpLoad(-1);if(S.ts!==sts||S.layer!==sl)return;
 try{var r=processTile(img,sl,spx);if(S.cache.size>=S.cacheMax)S.cache.delete(S.cache.keys().next().value);S.cache.set(ck,r)}catch(e){S.failed.add(ck)}schedRender()};
 img.onerror=function(){clearTimeout(tid);S.pending.delete(ck);bumpLoad(-1);S.failed.add(ck)};img.src=url}
@@ -294,13 +289,10 @@ img.onerror=function(){clearTimeout(tid);S.pending.delete(ck);bumpLoad(-1);S.fai
 var renderPend=false;
 function schedRender(){if(!renderPend){renderPend=true;requestAnimationFrame(doRender)}}
 function doRender(){renderPend=false;ctx.clearRect(0,0,canvas.width,canvas.height);var tiles=visTiles(),hit=0,miss=0;
-
-/* Эффект smooth: плавная интерполяция для dBZ, четкая сетка для ОЯ */
-ctx.imageSmoothingEnabled = (S.layer === 'radar');
-if (ctx.imageSmoothingEnabled) ctx.imageSmoothingQuality = 'high';
-
 for(var i=0;i<tiles.length;i++){var t=tiles[i],ck=CK(t.x,t.y),c=S.cache.get(ck);
 if(c){var r=tileRect(t.x,t.y);if(r.sw>0&&r.sh>0){
+  /* Убрано размытие/сглаживание (imageSmoothingEnabled всегда false) */
+  ctx.imageSmoothingEnabled = false; 
   ctx.globalAlpha=.8;ctx.drawImage(c,r.sx,r.sy,r.sw,r.sh);ctx.globalAlpha=1;hit++}}else{fetchTile(t.x,t.y);miss++}}
 
 if(S.layer === 'wx'){
