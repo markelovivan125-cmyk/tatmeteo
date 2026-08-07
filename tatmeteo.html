@@ -234,11 +234,14 @@ var map=L.map('map',{
 });
 
 // Официальная темная карта Leaflet (CartoDB Dark Matter)
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
   subdomains: 'abcd',
   maxZoom: 20,
-  detectRetina: true
+  attribution: '© OpenStreetMap, © CARTO'
 }).addTo(map);
+
+// Принудительно обновляем размер карты после загрузки
+setTimeout(function(){ map.invalidateSize(); }, 100);
 
 var canvas=$('radar'),ctx=canvas.getContext('2d');
 function resizeCanvas(){canvas.width=innerWidth;canvas.height=innerHeight;schedRender()}
@@ -344,8 +347,6 @@ toast('⏱ '+new Date(S.ts*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:
 function toggleLayer(){
   S.layer=S.layer==='radar'?'wx':'radar';
   $('btn-layer').textContent=S.layer==='radar'?'Отражаемость':'ОЯ Явления';
-  /* Применяем размытие для dBZ и убираем для ОЯ */
-  $('radar').style.filter = (S.layer === 'radar') ? 'blur(3px)' : 'none';
   S.px=1;S.cache.clear();S.pending.clear();S.failed.clear();buildLegend();forceRefresh();hidePopup();
 }
 function buildLegend(){var el=$('lbody');el.innerHTML='';var items=S.layer==='radar'?RPAL:PPAL;
@@ -425,7 +426,6 @@ map.on('move moveend zoomend',function(){if(crosshairMode)updateCrosshair()});
 /* ══════════════════════════════════════════
    INIT
 ══════════════════════════════════════════ */
- $('radar').style.filter = 'blur(3px)'; // Добавляем начальное размытие для dBZ
 buildLegend();buildFrames();updHUD();schedRender();
 
 })();
