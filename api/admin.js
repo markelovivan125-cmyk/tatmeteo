@@ -1,6 +1,6 @@
 import { kv } from '@vercel/kv';
 
-const ADMIN_SECRET = 'tatarmeteorology12345'; // Смените на свой сложный ключ!
+const ADMIN_SECRET = 'super-admin-key'; // Ваш секретный ключ
 
 export default async function handler(req, res) {
   const secret = req.query.secret || req.body?.secret;
@@ -8,12 +8,22 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     const passwords = await kv.smembers('passwords');
-    const logs = await kv.lrange('logs', 0, 19); // Последние 20 логов
+    const logs = await kv.lrange('logs', 0, 19);
 
     const passStatus = [];
     for (const p of passwords) {
-      const ip = await kv.get(`lock:${p}`);
-      passStatus.push({ password: p, inUse: !!ip, ip });
+      // Ищем все активные сессии для этого пароля
+      const keys = await kv.keys(`sess:${p}:*`);
+      let ips = [];
+      for (const k of keys) {
+        const ip = await kv.get(k);
+        if (ip) ips.push(ip);
+      }
+      passStatus.push({ 
+        password: p, 
+        activeDevices: keys.length, 
+        ips: ips.join(', ') 
+      });
     }
 
     return res.json({ passwords: passStatus, logs });
@@ -23,14 +33,18 @@ export default async function handler(req, res) {
     const { action, password } = req.body || {};
 
     if (action === 'generate') {
-      const newPass = Math.random().toString(36).slice(2, 10); // 8-символьный пароль
+      const newPass = Math.random().toString(36).slice(2, 10);
       await kv.sadd('passwords', newPass);
       return res.json({ success: true, password: newPass });
     }
 
     if (action === 'delete') {
       await kv.srem('passwords', password);
-      await kv.del(`lock:${password}`);
+      // Удаляем все активные сессии, привязанные к этому паролю
+      const keys = await kv.keys(`sess:${password}:*`);
+      if (keys.length > 0) {
+        await kv.del(...keys);
+      }
       return res.json({ success: true });
     }
   }
