@@ -1,9 +1,9 @@
-=import Redis from 'ioredis';
+import { Redis } from '@upstash/redis';
 
-if (!global._redis) {
-  global._redis = new Redis(process.env.tatmeteostorage_REDIS_URL);
-}
-const redis = global._redis;
+const redis = new Redis({
+  url: process.env.TATMETEOSTORAGE_REDIS_REST_URL || process.env.tatmeteostorage_REDIS_REST_URL,
+  token: process.env.TATMETEOSTORAGE_REDIS_REST_TOKEN || process.env.tatmeteostorage_REDIS_REST_TOKEN,
+});
 
 export default async function handler(req, res) {
   try {
