@@ -1,7 +1,7 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;background:#0a0a0a;font-family:-apple-system,"Segoe UI",sans-serif;color:#333;overflow:hidden}
 #map{position:fixed;inset:0;z-index:0}
-#radar{position:fixed;inset:0;z-index:400;pointer-events:none}
+#radar{position:fixed;inset:0;z-index:400;pointer-events:none;will-change:filter}
 
 .leaflet-container{background:#0a0a0a!important}
 .leaflet-control-attribution{display:none}
