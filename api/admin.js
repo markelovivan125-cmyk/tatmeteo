@@ -5,9 +5,6 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// Сложный ключ администратора
-const ADMIN_SECRET = 'xR9_@dminK3y#2024Sec!';
-
 export default async function handler(req, res) {
   const secret = req.query.secret || req.body?.secret;
   if (secret !== ADMIN_SECRET) return res.status(403).json({ error: 'Доступ запрещен' });
