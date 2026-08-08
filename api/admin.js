@@ -1,10 +1,7 @@
 import { kv } from '@vercel/kv';
 
-const ADMIN_SECRET = 'super-admin-key'; // Ваш секретный ключ
-
 export default async function handler(req, res) {
-  const secret = req.query.secret || req.body?.secret;
-  if (secret !== ADMIN_SECRET) return res.status(403).json({ error: 'Доступ запрещен' });
+  // Проверка секретного ключа полностью удалена!
 
   if (req.method === 'GET') {
     const passwords = await kv.smembers('passwords');
@@ -12,7 +9,6 @@ export default async function handler(req, res) {
 
     const passStatus = [];
     for (const p of passwords) {
-      // Ищем все активные сессии для этого пароля
       const keys = await kv.keys(`sess:${p}:*`);
       let ips = [];
       for (const k of keys) {
@@ -40,7 +36,6 @@ export default async function handler(req, res) {
 
     if (action === 'delete') {
       await kv.srem('passwords', password);
-      // Удаляем все активные сессии, привязанные к этому паролю
       const keys = await kv.keys(`sess:${password}:*`);
       if (keys.length > 0) {
         await kv.del(...keys);
