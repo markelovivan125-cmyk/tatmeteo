@@ -6,11 +6,6 @@ html,body{height:100%;background:#0a0a0a;font-family:-apple-system,"Segoe UI",sa
 .leaflet-container{background:#0a0a0a!important}
 .leaflet-control-attribution{display:none}
 
-.leaflet-popup-content-wrapper{background:rgba(20,20,20,.95);color:#eee;border:1px solid #333;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
-.leaflet-popup-tip{background:rgba(20,20,20,.95);border:1px solid #333}
-.leaflet-popup-content{margin:12px 16px;font-size:12px;line-height:1.5}
-.leaflet-popup-close-button{color:#888!important}
-
 .dropdown{position:fixed;top:50px;left:14px;background:rgba(20,20,20,.95);border:1px solid #333;border-radius:8px;backdrop-filter:blur(12px);z-index:1500;color:#eee;box-shadow:0 4px 20px rgba(0,0,0,.6);display:none;min-width:220px;overflow:hidden}
 .dropdown.visible{display:block}
 .dd-item{padding:10px 14px;cursor:pointer;font-size:12px;font-weight:600;transition:.15s;border-bottom:1px solid #2a2a2a}
@@ -68,8 +63,12 @@ html,body{height:100%;background:#0a0a0a;font-family:-apple-system,"Segoe UI",sa
 .ch-dot{position:absolute;width:8px;height:8px;left:-4px;top:-4px;border-radius:50%;background:#ff2828;box-shadow:0 0 0 2px #fff,0 0 6px rgba(0,0,0,.9)}
 #crosshair-label{position:fixed;z-index:601;pointer-events:none;display:none;background:rgba(10,10,10,.95);border:1.5px solid #4a7fe8;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:700;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.5);color:#fff;line-height:1.5;text-align:center}
 
+#pixel-popup{position:fixed;z-index:1100;background:rgba(10,10,10,.95);border:1.5px solid #4a7fe8;border-radius:10px;padding:10px 14px;font-size:12px;box-shadow:0 8px 28px rgba(0,0,0,.5);pointer-events:auto;display:none;min-width:190px;max-width:250px;color:#ddd}
+#pixel-popup.popup-in{animation:popupIn .28s cubic-bezier(.34,1.56,.64,1) forwards}
+@keyframes popupIn{0%{transform:scale(.65) translateY(10px);opacity:0}100%{transform:scale(1) translateY(0);opacity:1}}
 .popup-header{display:flex;align-items:center;gap:9px;margin-bottom:7px}
 .popup-swatch{width:20px;height:20px;border-radius:4px;border:1.5px solid #fff;flex-shrink:0}
-.popup-label{font-size:14px;font-weight:700;color:#fff;line-height:1.2}
-.popup-meta{font-size:11px;color:#aaa;margin-bottom:8px;line-height:1.7}
-.popup-meta b{color:#fff}
+.popup-label{font-size:13px;font-weight:700;color:#fff;line-height:1.2}
+.popup-meta{font-size:11px;color:#aaa;margin-bottom:8px;line-height:1.5}
+.popup-close{font-size:10px;color:#666;cursor:pointer;text-align:right;display:block;margin-top:2px}
+.popup-close:hover{color:#fff}
