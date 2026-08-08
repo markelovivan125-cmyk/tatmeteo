@@ -11,8 +11,16 @@
 <div id="map"></div>
 <canvas id="radar"></canvas>
 
+<!-- Меню слоев -->
+<div class="dropdown" id="layer-menu">
+  <div class="dd-item active" data-layer="rr-radar">Отражаемость (RainRadar)</div>
+  <div class="dd-item" data-layer="rr-wx">ОЯ Явления (RainRadar)</div>
+  <div class="dd-item" data-layer="rv-sat">Облака IR (Спутник)</div>
+  <div class="dd-item" data-layer="rv-precip">Осадки (RainViewer)</div>
+</div>
+
 <div class="panel" id="ctrl">
-  <button class="btn on" id="btn-layer">Отражаемость</button><div class="sep"></div>
+  <button class="btn" id="btn-layer-menu">🎨 Слои</button><div class="sep"></div>
   <button class="btn" id="btn-refresh">↺ Сейчас</button><button class="btn" id="spd">1×</button><div class="sep"></div>
   <button class="btn" id="btn-crosshair">⊕ Прицел</button>
   <div class="sep"></div>
