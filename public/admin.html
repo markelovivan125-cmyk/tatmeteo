@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+                                        <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -30,9 +30,13 @@
     <div id="list" style="margin-top: 20px;"></div>
 
     <script>
+        // Тот самый секретный ключ. Он совпадает с ключом в api/admin.js
+        const SECRET = 'xR9_@dminK3y#2024Sec!';
+
         async function load() {
             try {
-                const res = await fetch('/api/admin');
+                // Передаем ключ в URL: /api/admin?secret=КЛЮЧ
+                const res = await fetch('/api/admin?secret=' + SECRET);
                 if (!res.ok) {
                     const errText = await res.text();
                     document.getElementById('list').innerHTML = `<div class="err">Ошибка загрузки (Статус ${res.status}):<br><br>${errText}</div>`;
@@ -40,7 +44,7 @@
                     return;
                 }
                 const data = await res.json();
-            
+                
                 // Считаем общую статистику
                 let totalPasswords = data.passwords.length;
                 let totalActiveDevices = 0;
@@ -87,7 +91,8 @@
             btn.disabled = true;
             
             try {
-                const res = await fetch('/api/admin', { 
+                // Передаем ключ в теле запроса
+                const res = await fetch('/api/admin?secret=' + SECRET, { 
                     method: 'POST', 
                     headers: {'Content-Type':'application/json'}, 
                     body: JSON.stringify({ action: 'generate' }) 
@@ -108,7 +113,7 @@
 
         async function del(pass) {
             if (confirm('Удалить этот пароль?')) {
-                await fetch('/api/admin', { 
+                await fetch('/api/admin?secret=' + SECRET, { 
                     method: 'POST', 
                     headers: {'Content-Type':'application/json'}, 
                     body: JSON.stringify({ action: 'delete', password: pass }) 
@@ -117,7 +122,6 @@
             }
         }
 
-        // Загружаем при открытии и обновляем каждые 5 секунд
         load();
         setInterval(load, 5000);
     </script>
