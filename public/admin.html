@@ -20,14 +20,15 @@
     <div id="list"></div>
 
     <script>
-        const SECRET = 'super-admin-key'; // Тот же ключ, что в api/admin.js
-
         async function load() {
-            const res = await fetch(`/api/admin?secret=${SECRET}`);
-            if (!res.ok) { document.body.innerHTML = 'Доступ запрещен'; return; }
+            const res = await fetch('/api/admin');
+            if (!res.ok) { document.getElementById('list').innerHTML = 'Ошибка загрузки данных'; return; }
             const data = await res.json();
             
             let html = '<h2>Активные пароли:</h2><ul>';
+            if (data.passwords.length === 0) {
+                html += '<li>Паролей пока нет. Сгенерируйте новый.</li>';
+            }
             data.passwords.forEach(p => {
                 const badgeClass = `badge-${p.activeDevices}`;
                 let statusText = `${p.activeDevices}/1 устр.`;
@@ -40,6 +41,9 @@
                 </li>`;
             });
             html += '</ul><h2>Логи (последние 20):</h2><ul>';
+            if (data.logs.length === 0) {
+                html += '<li>Логов нет.</li>';
+            }
             data.logs.forEach(l => html += `<li>${l}</li>`);
             html += '</ul>';
             document.getElementById('list').innerHTML = html;
@@ -49,7 +53,7 @@
             await fetch('/api/admin', { 
                 method: 'POST', 
                 headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify({secret: SECRET, action: 'generate'}) 
+                body: JSON.stringify({ action: 'generate' }) 
             });
             load();
         };
@@ -58,7 +62,7 @@
             await fetch('/api/admin', { 
                 method: 'POST', 
                 headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify({secret: SECRET, action: 'delete', password: pass}) 
+                body: JSON.stringify({ action: 'delete', password: pass }) 
             });
             load();
         }
