@@ -1,0 +1,20 @@
+<script>
+  // Проверка авторизации
+  fetch('/api/me').then(r => r.json()).then(d => {
+    if (!d.auth) window.location.href = '/login.html';
+  });
+
+  // Пульс каждые 15 секунд (чтобы сервер знал, что мы еще тут)
+  setInterval(() => {
+    fetch('/api/auth?action=heartbeat', { method: 'POST' });
+  }, 15000);
+</script>
+
+<!-- Кнопка выхода (добавьте куда-нибудь в панель управления) -->
+<button id="logout-btn" style="position:fixed;top:14px;right:40px;z-index:2000;background:rgba(20,20,20,.9);border:1px solid #444;color:#ff5252;padding:5px 10px;border-radius:6px;cursor:pointer;">Выйти</button>
+<script>
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    await fetch('/api/auth?action=logout', { method: 'POST' });
+    window.location.href = '/login.html';
+  });
+</script>
