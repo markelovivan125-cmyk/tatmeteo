@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>2х2 | КиберРадар</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- Подключаем наши стили -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div id="map"></div>
+  <canvas id="radar"></canvas>
+
+  <div class="panel glass" id="ctrl">
+    <button class="btn on" id="btn-layer">Отражаемость</button>
+    <div class="sep"></div>
+    <button class="btn icon-btn" id="btn-refresh" title="Обновить">↻</button>
+    <button class="btn" id="spd">1×</button>
+    <button class="btn" id="pxbtn">2 км</button> <!-- по умолчанию 2 км, не 1 км -->
+    <button class="btn" id="btn-smooth">Сглаживание</button>
+    <div id="smooth-control">
+      <label>сила</label>
+      <input type="range" id="smooth-strength" min="0" max="4" step="1" value="1" />
+      <span id="smooth-val">1</span>
+    </div>
+    <div class="sep"></div>
+    <button class="btn icon-btn" id="btn-crosshair" title="Прицел">⊕</button>
+    <button class="btn" id="btn-ruler" title="Линейка">📏</button>
+    <div class="sep"></div>
+    <button class="btn icon-btn" id="btn-palettes" title="Палитры">🎨</button>
+  </div>
+
+  <div class="panel glass" id="legend">
+    <div id="legend-header">
+      <h3 id="ltitle">ОТРАЖАЕМОСТЬ dBZ</h3>
+      <div style="display:flex;align-items:center;gap:4px"><button id="toggle-legend-btn">−</button></div>
+    </div>
+    <div id="lbody"></div>
+  </div>
+  <button class="restore-btn glass" id="restore-legend" onclick="restorePanel('legend')">Легенда</button>
+
+  <div class="panel glass" id="tl">
+    <button id="playbtn">▶</button>
+    <div id="track">
+      <div id="tfill"></div><div id="tthumb"></div><div id="tlbls"></div>
+      <div id="time-tooltip" class="glass"><div class="tt-time">--:--</div><div class="tt-date">--</div><div class="tt-diff">сейчас</div></div>
+    </div>
+    <button class="btn" id="b-minus1h" style="padding:4px 8px;font-size:10px">-1ч</button>
+    <button class="btn" id="b-minus10m" style="padding:4px 8px;font-size:10px">-10м</button>
+    <button class="btn" id="b-plus10m" style="padding:4px 8px;font-size:10px">+10м</button>
+  </div>
+  <button class="restore-btn glass" id="restore-tl" onclick="restorePanel('tl')">Таймлайн</button>
+
+  <div id="pulse"></div>
+  <div id="dbg"></div>
+  <div id="hover-indicator"></div>
+  <div id="pixel-popup" class="glass"></div>
+  <div id="crosshair"><div class="ch-h"></div><div class="ch-v"></div><div class="ch-dot"></div></div>
+  <div id="crosshair-label" class="glass"></div>
+
+  <!-- Модальное окно палитр -->
+  <div id="palette-modal">
+    <div class="modal-content">
+      <h2>
+        <span>🎨 Управление палитрами</span>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </h2>
+      <div class="modal-tabs">
+        <button class="active" data-layer="radar">Отражаемость</button>
+        <button data-layer="wx">Явления</button>
+      </div>
+      <div id="palette-list-container" class="palette-list"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="load-palette-btn">📂 Загрузить .pal</button>
+        <button class="btn" id="create-palette-btn">➕ Создать</button>
+        <button class="btn" id="delete-palette-btn" style="color:#ff6b6b;">🗑 Удалить</button>
+      </div>
+      <input type="file" id="file-input" accept=".pal,.json,.txt" />
+
+      <div class="create-form" id="create-form">
+        <label>Название палитры</label>
+        <input type="text" id="new-pal-name" placeholder="Моя палитра" value="Новая палитра" />
+        <label>Значения (порог, цвет, метка)</label>
+        <div class="row">
+          <input type="number" id="entry-val" placeholder="дБZ" value="0" step="1" />
+          <input type="color" id="entry-color" value="#00aaff" />
+          <input type="text" id="entry-label" placeholder="метка" value="Осадки" />
+          <button class="btn" id="add-entry-btn">+ Добавить</button>
+        </div>
+        <div class="entries-list" id="entries-list"></div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary" id="save-palette-btn">💾 Сохранить</button>
+          <button class="btn" id="cancel-create-btn">Отмена</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Подключаем внешние библиотеки -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Подключаем наш скрипт -->
+  <script src="script.js"></script>
+</body>
+</html>
