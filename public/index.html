@@ -1,6 +1,58 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+  <!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2х2 | Вход</title>
+    <style>
+        body { margin:0; padding:0; background:#0a0a0a; font-family:-apple-system,"Segoe UI",sans-serif; color:#eee; height:100vh; display:flex; justify-content:center; align-items:center; }
+        .box { background:rgba(20,20,20,.95); border:1px solid #333; border-radius:12px; padding:30px; text-align:center; box-shadow:0 4px 30px rgba(0,0,0,.8); width:300px; }
+        h2 { margin:0 0 20px 0; color:#7ab4ff; letter-spacing:1px; }
+        input { background:#1a1a1a; border:1px solid #444; color:#eee; padding:12px; border-radius:8px; width:100%; margin-bottom:15px; text-align:center; font-size:16px; box-sizing:border-box; }
+        button { background:#4a7fe8; color:#fff; border:0; padding:12px; border-radius:8px; cursor:pointer; width:100%; font-weight:700; font-size:14px; }
+        button:hover { background:#3a6fd8; }
+        .error { color:#ff5252; font-size:12px; margin-top:10px; display:none; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>2х2 | РАДАР</h2>
+        <form id="loginForm">
+            <input type="password" id="pass" placeholder="Введите пароль" required>
+            <button type="submit">Войти</button>
+            <div class="error" id="err"></div>
+        </form>
+    </div>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const pass = document.getElementById('pass').value;
+            const errBox = document.getElementById('err');
+            errBox.style.display = 'none';
+
+            const res = await fetch('/api/auth?action=login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pass })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                window.location.href = '/';
+            } else {
+                errBox.textContent = data.error;
+                errBox.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+  
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>2х2 | КиберРадар</title>
