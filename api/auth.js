@@ -1,4 +1,10 @@
-import { kv } from '@vercel/kv';
+import Redis from 'ioredis';
+
+// Подключаемся к вашей базе данных
+if (!global._redis) {
+  global._redis = new Redis(process.env.tatmeteostorage_REDIS_URL);
+}
+const redis = global._redis;
 
 export default async function handler(req, res) {
   const action = req.query.action;
@@ -21,26 +27,20 @@ export default async function handler(req, res) {
     if (action === 'login') {
       if (!password) return res.status(400).json({ success: false, error: 'Введите пароль' });
 
-      const exists = await kv.sismember('passwords', password);
-      if (!exists) return res.json({ success: false, error: 'Неверный пароль' });
+      const exists = await redis.sismember('passwords', password);
+      if (exists !== 1) return res.json({ success: false, error: 'Неверный пароль' });
 
-      // Считаем, сколько устройств уже онлайн с этим паролем
-      const sessionKeys = await kv.keys(`sess:${password}:*`);
-      const activeDevices = sessionKeys.length;
-
-      // Если уже 1 или больше устройств онлайн - не пускаем (Лимит: 1 устройство)
-      if (activeDevices >= 1) {
+      const sessionKeys = await redis.keys(`sess:${password}:*`);
+      if (sessionKeys.length >= 1) {
         return res.json({ success: false, error: '🚫 Доступ запрещен! Этот пароль уже используется на другом устройстве.' });
       }
 
-      // Создаем уникальный ID сессии для этого устройства
       const sid = Math.random().toString(36).slice(2);
-      // Сохраняем сессию в Redis на 60 секунд (пульс будет продлевать её)
-      await kv.set(`sess:${password}:${sid}`, userIp, { ex: 60 });
+      // Записываем сессию на 60 секунд (EX 60)
+      await redis.set(`sess:${password}:${sid}`, userIp, 'EX', 60);
       
-      await kv.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${password} | Вход (Устр: 1/1)`);
+      await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${password} | Вход (Устр: 1/1)`);
 
-      // Ставим две куки: пароль и ID сессии
       res.setHeader('Set-Cookie', [
         `auth_pass=${password}; HttpOnly; Path=/; Max-Age=3600; SameSite=Lax`,
         `auth_sid=${sid}; HttpOnly; Path=/; Max-Age=3600; SameSite=Lax`
@@ -57,9 +57,9 @@ export default async function handler(req, res) {
       if (passMatch && sidMatch) {
         const pass = passMatch[1];
         const sid = sidMatch[1];
-        const exists = await kv.exists(`sess:${pass}:${sid}`);
-        if (exists) {
-          await kv.set(`sess:${pass}:${sid}`, userIp, { ex: 60 });
+        const exists = await redis.exists(`sess:${pass}:${sid}`);
+        if (exists === 1) {
+          await redis.set(`sess:${pass}:${sid}`, userIp, 'EX', 60);
         }
       }
       return res.json({ success: true });
@@ -72,8 +72,8 @@ export default async function handler(req, res) {
       const sidMatch = cookies.match(/auth_sid=([^;]+)/);
       
       if (passMatch && sidMatch) {
-        await kv.del(`sess:${passMatch[1]}:${sidMatch[1]}`);
-        await kv.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${passMatch[1]} | Выход`);
+        await redis.del(`sess:${passMatch[1]}:${sidMatch[1]}`);
+        await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${passMatch[1]} | Выход`);
         
         res.setHeader('Set-Cookie', [
           'auth_pass=; HttpOnly; Path=/; Max-Age=0',
