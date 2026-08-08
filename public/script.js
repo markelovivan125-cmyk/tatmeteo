@@ -70,7 +70,7 @@
 
   var S = {
     ts: 0,
-    px: 1, // по умолчанию 2 км (px=1)
+    px: 1,
     layer: 'radar',
     playing: false,
     timer: null,
@@ -89,7 +89,7 @@
     smoothStrength: 1,
     fade: { active: false, start: 0, duration: 400, alpha: 1 },
     pxLevels: [0.5, 1, 2, 4],
-    pxIndex: 1, // 2 км
+    pxIndex: 1,
     ruler: {
       active: false,
       points: [],
@@ -202,14 +202,9 @@
 
   // ─── гео-преобразования ──────────────────────────────────
   function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * (1 << z)); }
-
-  function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math
-          .PI) / 2 * (1 << z)); }
-
+  function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * (1 << z)); }
   function x2lon(x, z) { return x / (1 << z) * 360 - 180; }
-
-  function y2lat(y, z) { var n = Math.PI - 2 * Math.PI * y / (1 << z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) -
-          Math.exp(-n))); }
+  function y2lat(y, z) { var n = Math.PI - 2 * Math.PI * y / (1 << z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))); }
 
   function visTiles() {
     var b = map.getBounds(),
@@ -231,7 +226,6 @@
   }
 
   function makeCK(l, t, p, x, y) { return l + '|' + t + '|' + p + '|' + x + '|' + y; }
-
   function CK(x, y) { return makeCK(S.layer, S.ts, S.px, x, y); }
 
   function getColor(raw) {
@@ -261,16 +255,13 @@
       }
     }
     for (var ki = 0; ki < kernel.length; ki++) kernel[ki] /= sum;
-    var kw = size,
-      kh = size;
+    var kw = size, kh = size;
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
-        var acc = 0,
-          wsum = 0;
+        var acc = 0, wsum = 0;
         for (var ky = -half; ky <= half; ky++) {
           for (var kx = -half; kx <= half; kx++) {
-            var px = x + kx,
-              py = y + ky;
+            var px = x + kx, py = y + ky;
             if (px < 0 || px >= w || py < 0 || py >= h) continue;
             var idx = py * w + px;
             if (raw[idx] >= 0) {
@@ -293,8 +284,7 @@
     src.width = src.height = 256;
     var sc = src.getContext('2d');
     sc.drawImage(img, 0, 0);
-    var id = sc.getImageData(0, 0, 256, 256),
-      d = id.data;
+    var id = sc.getImageData(0, 0, 256, 256), d = id.data;
 
     var raw = new Float32Array(256 * 256);
     for (var i = 0; i < d.length; i += 4) {
@@ -317,22 +307,17 @@
     oc.imageSmoothingEnabled = false;
 
     var effectivePx = (px < 1) ? 1 : px;
-    var bw = Math.ceil(256 / effectivePx),
-      bh = Math.ceil(256 / effectivePx);
+    var bw = Math.ceil(256 / effectivePx), bh = Math.ceil(256 / effectivePx);
 
     for (var py = 0; py < bh; py++) {
       for (var pxx = 0; pxx < bw; pxx++) {
-        var x0 = pxx * effectivePx,
-          y0 = py * effectivePx,
-          x1 = Math.min(x0 + effectivePx, 256),
-          y1 = Math.min(y0 + effectivePx, 256);
-        var sum = 0,
-          n = 0;
+        var x0 = pxx * effectivePx, y0 = py * effectivePx,
+          x1 = Math.min(x0 + effectivePx, 256), y1 = Math.min(y0 + effectivePx, 256);
+        var sum = 0, n = 0;
         for (var yy = y0; yy < y1; yy++) {
           for (var xx = x0; xx < x1; xx++) {
             var idx = yy * 256 + xx;
-            if (smoothed[idx] >= 0) { sum += smoothed[idx];
-              n++; }
+            if (smoothed[idx] >= 0) { sum += smoothed[idx]; n++; }
           }
         }
         if (n > 0) {
@@ -366,8 +351,7 @@
     };
   }
 
-  function bumpLoad(d) { S.loadN = Math.max(0, S.loadN + d);
-    $('pulse').classList.toggle('busy', S.loadN > 0); }
+  function bumpLoad(d) { S.loadN = Math.max(0, S.loadN + d); $('pulse').classList.toggle('busy', S.loadN > 0); }
 
   function fetchTile(x, y) {
     var ck = CK(x, y);
@@ -377,14 +361,8 @@
     var url = SRC + '/' + S.ts + '/' + FZ + '/' + x + '_' + y + '.png';
     var img = new Image();
     img.crossOrigin = 'anonymous';
-    var spx = S.px,
-      sl = S.layer,
-      sts = S.ts,
-      ssmooth = S.smooth,
-      sstrength = S.smoothStrength;
-    var tid = setTimeout(function() { S.pending.delete(ck);
-      bumpLoad(-1);
-      S.failed.add(ck); }, 8000);
+    var spx = S.px, sl = S.layer, sts = S.ts, ssmooth = S.smooth, sstrength = S.smoothStrength;
+    var tid = setTimeout(function() { S.pending.delete(ck); bumpLoad(-1); S.failed.add(ck); }, 8000);
     img.onload = function() {
       clearTimeout(tid);
       S.pending.delete(ck);
@@ -407,10 +385,8 @@
   }
 
   var renderPend = false;
-
   function schedRender() {
-    if (!renderPend) { renderPend = true;
-      requestAnimationFrame(doRender); }
+    if (!renderPend) { renderPend = true; requestAnimationFrame(doRender); }
   }
 
   function doRender() {
@@ -419,8 +395,7 @@
 
     if (S.fade.active) {
       var elapsed = (performance.now() - S.fade.start) / S.fade.duration;
-      if (elapsed >= 1) { S.fade.active = false;
-        S.fade.alpha = 1; } else {
+      if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; } else {
         S.fade.alpha = Math.min(elapsed, 1);
         S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3);
         schedRender();
@@ -429,13 +404,10 @@
     var alpha = S.fade.active ? S.fade.alpha : 1;
     var tiles = visTiles();
     ctx.globalAlpha = alpha;
-    // Всегда пиксельное отображение без интерполяции
     ctx.imageSmoothingEnabled = false;
 
     for (var i = 0; i < tiles.length; i++) {
-      var t = tiles[i],
-        ck = CK(t.x, t.y),
-        entry = S.cache.get(ck);
+      var t = tiles[i], ck = CK(t.x, t.y), entry = S.cache.get(ck);
       if (entry && entry.canvas) {
         var r = tileRect(t.x, t.y);
         if (r.sw > 0 && r.sh > 0) {
@@ -457,13 +429,9 @@
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (var gi = 0; gi < tiles.length; gi++) {
-        var gt = tiles[gi],
-          gr = tileRect(gt.x, gt.y);
+        var gt = tiles[gi], gr = tileRect(gt.x, gt.y);
         if (gr.sw <= 0 || gr.sh <= 0) continue;
-        var scX = gr.sw / 256,
-          scY = gr.sh / 256,
-          bW = S.px * scX,
-          bH = S.px * scY;
+        var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY;
         if (bW < 1 || bH < 1) continue;
         var cols = Math.ceil(256 / S.px);
         for (var ci = 0; ci <= cols; ci++) {
@@ -483,15 +451,9 @@
   }
 
   map.on('move', schedRender);
-  map.on('moveend zoomend', function() { S.failed.clear();
-    schedRender(); });
+  map.on('moveend zoomend', function() { S.failed.clear(); schedRender(); });
 
-  function forceRefresh() { S.cache.clear();
-    S.failed.clear();
-    S.pending.clear();
-    S.loadN = 0;
-    $('pulse').classList.remove('busy');
-    schedRender(); }
+  function forceRefresh() { S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender(); }
 
   function doRefresh() {
     setTime(nowTs(), false);
@@ -506,16 +468,13 @@
   function updThumb() {
     var f = S.frames;
     if (!f.length) return;
-    var r = f[f.length - 1] - f[0],
-      p = r === 0 ? 0 : Math.max(0, Math.min(1, (S.ts - f[0]) / r));
+    var r = f[f.length - 1] - f[0], p = r === 0 ? 0 : Math.max(0, Math.min(1, (S.ts - f[0]) / r));
     $('tfill').style.width = p * 100 + '%';
     $('tthumb').style.left = p * 100 + '%';
   }
 
   function buildFrames() {
-    var mx = nowTs(),
-      from = mx - MAX_HISTORY_SEC,
-      frames = [];
+    var mx = nowTs(), from = mx - MAX_HISTORY_SEC, frames = [];
     for (var t = from; t <= mx; t += STEP) frames.push(t);
     S.frames = frames;
     var el = $('tlbls');
@@ -525,15 +484,13 @@
       var idx = Math.round(i / 4 * (frames.length - 1));
       if (idx >= frames.length) idx = frames.length - 1;
       var s = document.createElement('span');
-      s.textContent = new Date(frames[idx] * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit',
-        timeZone: 'Europe/Moscow' });
+      s.textContent = new Date(frames[idx] * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
       el.appendChild(s);
     }
     updThumb();
   }
 
-  var drag = false,
-    timeTooltip = $('time-tooltip');
+  var drag = false, timeTooltip = $('time-tooltip');
 
   function tsFromX(cx) {
     var r = $('track').getBoundingClientRect();
@@ -547,26 +504,19 @@
   }
 
   function formatTimeDiff(ts) {
-    var now = nowTs(),
-      diff = ts - now,
-      ad = Math.abs(diff);
+    var now = nowTs(), diff = ts - now, ad = Math.abs(diff);
     if (ad < 60) return { text: 'сейчас', cls: 'now' };
-    var mins = Math.round(ad / 60),
-      hours = Math.floor(mins / 60),
-      rm = mins % 60,
-      text = '';
+    var mins = Math.round(ad / 60), hours = Math.floor(mins / 60), rm = mins % 60, text = '';
     if (hours > 0) { text = hours + 'ч'; if (rm > 0) text += ' ' + rm + 'м'; } else text = mins + 'м';
     return diff < 0 ? { text: '−' + text + ' назад', cls: 'past' } : { text: '+' + text + ' вперёд', cls: 'future' };
   }
 
   function showTimeTooltip(ts, pct) {
     var d = new Date(ts * 1000),
-      ts2 = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', second: '2-digit',
-        timeZone: 'Europe/Moscow' }),
+      ts2 = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Moscow' }),
       ds = d.toLocaleDateString('ru', { day: '2-digit', month: 'short', timeZone: 'Europe/Moscow' }),
       di = formatTimeDiff(ts);
-    timeTooltip.innerHTML = '<div class="tt-time">' + ts2 + '</div><div class="tt-date">' + ds + ' МСК</div><div class="tt-diff ' +
-      di.cls + '">' + di.text + '</div>';
+    timeTooltip.innerHTML = '<div class="tt-time">' + ts2 + '</div><div class="tt-date">' + ds + ' МСК</div><div class="tt-diff ' + di.cls + '">' + di.text + '</div>';
     timeTooltip.style.left = pct + '%';
     timeTooltip.classList.add('visible');
   }
@@ -575,8 +525,7 @@
 
   $('track').addEventListener('pointerdown', function(e) {
     drag = true;
-    var ts = tsFromX(e.clientX),
-      pct = pctFromX(e.clientX);
+    var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX);
     setTime(ts, true);
     updHUD();
     showTimeTooltip(ts, pct);
@@ -584,19 +533,14 @@
   });
   $('track').addEventListener('pointermove', function(e) {
     if (drag) {
-      var ts = tsFromX(e.clientX),
-        pct = pctFromX(e.clientX);
+      var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX);
       setTime(ts, true);
       updHUD();
       showTimeTooltip(ts, pct);
     }
   });
   document.addEventListener('pointerup', function() {
-    if (drag) { drag = false;
-      hideTimeTooltip();
-      buildFrames();
-      S.failed.clear();
-      forceRefresh(); }
+    if (drag) { drag = false; hideTimeTooltip(); buildFrames(); S.failed.clear(); forceRefresh(); }
   });
   $('track').addEventListener('mousemove', function(e) {
     if (!drag) showTimeTooltip(tsFromX(e.clientX), pctFromX(e.clientX));
@@ -604,7 +548,6 @@
   $('track').addEventListener('mouseleave', function() { if (!drag) hideTimeTooltip(); });
 
   function animMs() { return 900 / S.speeds[S.speedI]; }
-
   function togglePlay() { S.playing ? stopPlay() : startPlay(); }
 
   function startPlay() {
@@ -631,15 +574,13 @@
   function cycleSpeed() {
     S.speedI = (S.speedI + 1) % S.speeds.length;
     $('spd').textContent = S.speeds[S.speedI] + '×';
-    if (S.playing) { stopPlay();
-      startPlay(); }
+    if (S.playing) { stopPlay(); startPlay(); }
   }
 
   function shiftTs(d) {
     stopPlay();
     var n = Math.round((S.ts + d) / STEP) * STEP;
-    var mn = minTs(),
-      mx = nowTs();
+    var mn = minTs(), mx = nowTs();
     n = Math.max(mn, Math.min(n, mx));
     if (n <= mn) toast('⚠️ Максимум ' + HISTORY_MINUTES + ' мин назад');
     setTime(n, true);
@@ -732,29 +673,23 @@
     if (!S.ruler.active) return;
     var latlng = e.latlng;
     S.ruler.points.push(latlng);
-    var marker = L.circleMarker(latlng, { radius: 5, color: '#00f0ff', fillColor: '#fff', fillOpacity: 1, weight: 2,
-        className: 'ruler-marker' })
-      .addTo(map);
+    var marker = L.circleMarker(latlng, { radius: 5, color: '#00f0ff', fillColor: '#fff', fillOpacity: 1, weight: 2, className: 'ruler-marker' }).addTo(map);
     S.ruler.markers.push(marker);
     updateRulerLine();
     updateRulerLabels();
   }
 
   function updateRulerLine() {
-    if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline);
-      S.ruler.polyline = null; }
+    if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline); S.ruler.polyline = null; }
     if (S.ruler.points.length >= 2) {
-      S.ruler.polyline = L.polyline(S.ruler.points, { color: '#00f0ff', weight: 2, dashArray: '6 4', opacity: 0.8,
-          className: 'ruler-line' })
-        .addTo(map);
+      S.ruler.polyline = L.polyline(S.ruler.points, { color: '#00f0ff', weight: 2, dashArray: '6 4', opacity: 0.8, className: 'ruler-line' }).addTo(map);
     }
   }
 
   function updateRulerLabels() {
     S.ruler.segmentLabels.forEach(function(l) { map.removeLayer(l); });
     S.ruler.segmentLabels = [];
-    if (S.ruler.label) { map.removeLayer(S.ruler.label);
-      S.ruler.label = null; }
+    if (S.ruler.label) { map.removeLayer(S.ruler.label); S.ruler.label = null; }
     if (S.ruler.points.length < 2) return;
 
     var totalDist = 0;
@@ -771,8 +706,7 @@
     }).addTo(map);
 
     for (var j = 1; j < S.ruler.points.length; j++) {
-      var p1 = S.ruler.points[j - 1],
-        p2 = S.ruler.points[j];
+      var p1 = S.ruler.points[j - 1], p2 = S.ruler.points[j];
       var segDist = (p1.distanceTo(p2) / 1000).toFixed(1);
       var midSeg = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2);
       var segLabel = L.marker(midSeg, {
@@ -789,10 +723,8 @@
 
   function clearRuler() {
     S.ruler.points = [];
-    if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline);
-      S.ruler.polyline = null; }
-    if (S.ruler.label) { map.removeLayer(S.ruler.label);
-      S.ruler.label = null; }
+    if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline); S.ruler.polyline = null; }
+    if (S.ruler.label) { map.removeLayer(S.ruler.label); S.ruler.label = null; }
     S.ruler.segmentLabels.forEach(function(l) { map.removeLayer(l); });
     S.ruler.segmentLabels = [];
     S.ruler.markers.forEach(function(m) { map.removeLayer(m); });
@@ -836,71 +768,49 @@
   }
 
   function toggleLegend() {
-    var lg = $('legend'),
-      btn = $('toggle-legend-btn');
-    if (S.legendVis) { lg.classList.add('collapsed');
-      btn.innerHTML = '+'; } else { lg.classList.remove('collapsed');
-      btn.innerHTML = '−'; }
+    var lg = $('legend'), btn = $('toggle-legend-btn');
+    if (S.legendVis) { lg.classList.add('collapsed'); btn.innerHTML = '+'; } else { lg.classList.remove('collapsed'); btn.innerHTML = '−'; }
     S.legendVis = !S.legendVis;
   }
 
   var toastTmr;
-
   function toast(m) {
     var el = $('dbg');
     clearTimeout(toastTmr);
     el.style.color = '#00f0ff';
     el.textContent = m;
-    toastTmr = setTimeout(function() { el.style.color = '';
-      doRender(); }, 2500);
+    toastTmr = setTimeout(function() { el.style.color = ''; doRender(); }, 2500);
   }
 
   setInterval(function() {
     if (!S.playing && !S.manualTime) {
       var n = nowTs();
-      if (n !== S.ts) { S.ts = n;
-        updHUD();
-        forceRefresh();
-        toast('Новые данные'); }
+      if (n !== S.ts) { S.ts = n; updHUD(); forceRefresh(); toast('Новые данные'); }
     }
     buildFrames();
   }, 60000);
 
   // ─── ПРИЦЕЛ И ПИКСЕЛЬНЫЙ ПОПАП ──────────────────────────
-  var hoverEl = $('hover-indicator'),
-    popupEl = $('pixel-popup'),
-    crosshairEl = $('crosshair'),
-    crosshairLbl = $('crosshair-label');
-  var popupVisible = false,
-    crosshairMode = false;
+  var hoverEl = $('hover-indicator'), popupEl = $('pixel-popup'), crosshairEl = $('crosshair'), crosshairLbl = $('crosshair-label');
+  var popupVisible = false, crosshairMode = false;
 
   function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   function findPalEntry(r, g, b) {
-    var items = getCurrentPaletteItems(),
-      best = null,
-      bd = 1e9;
+    var items = getCurrentPaletteItems(), best = null, bd = 1e9;
     for (var i = 0; i < items.length; i++) {
-      var p = items[i],
-        dr = r - p.r[0],
-        dg = g - p.r[1],
-        db = b - p.r[2],
-        d = dr * dr + dg * dg + db * db;
-      if (d < bd) { bd = d;
-        best = p; }
+      var p = items[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2], d = dr * dr + dg * dg + db * db;
+      if (d < bd) { bd = d; best = p; }
     }
     return bd < 3000 ? { label: best.l, v: best.v } : null;
   }
 
-  // ─── ПОЛУЧЕНИЕ БЛОКА С ТОЧНЫМ ЗНАЧЕНИЕМ dBZ ──────────
   function getBlockAt(mx, my) {
     var tiles = visTiles();
     for (var i = 0; i < tiles.length; i++) {
-      var t = tiles[i],
-        r = tileRect(t.x, t.y);
+      var t = tiles[i], r = tileRect(t.x, t.y);
       if (r.sw <= 0 || r.sh <= 0 || mx < r.sx || mx >= r.sx + r.sw || my < r.sy || my >= r.sy + r.sh) continue;
-      var ck = CK(t.x, t.y),
-        entry = S.cache.get(ck);
+      var ck = CK(t.x, t.y), entry = S.cache.get(ck);
       if (!entry || !entry.canvas) return null;
 
       var effectivePx = (S.px < 1) ? 1 : S.px;
@@ -916,15 +826,11 @@
       try {
         var pd = entry.canvas.getContext('2d').getImageData(cx2, cy2, 1, 1).data;
         if (!pd[3]) return null;
-        var scX = r.sw / 256,
-          scY = r.sh / 256;
-        // Получаем точное значение dBZ из raw, если доступно
+        var scX = r.sw / 256, scY = r.sh / 256;
         var dbz = -1;
         if (entry.raw && entry.raw.length > 0) {
-          // Вычисляем точные координаты внутри тайла
           var ix = Math.round(cx2);
           var iy = Math.round(cy2);
-          // Убедимся, что не выходим за границы
           if (ix >= 0 && ix < 256 && iy >= 0 && iy < 256) {
             var rawIdx = iy * 256 + ix;
             if (rawIdx < entry.raw.length) {
@@ -938,11 +844,9 @@
           sw: Math.max(4, Math.round(effectivePx * scX)),
           sh: Math.max(4, Math.round(effectivePx * scY)),
           color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')',
-          r: pd[0],
-          g: pd[1],
-          b: pd[2],
+          r: pd[0], g: pd[1], b: pd[2],
           info: findPalEntry(pd[0], pd[1], pd[2]),
-          dbz: dbz // точное значение
+          dbz: dbz
         };
       } catch (e) { return null; }
     }
@@ -951,9 +855,7 @@
 
   function updateCrosshair() {
     if (!crosshairMode) return;
-    var cx = innerWidth / 2,
-      cy = innerHeight / 2,
-      block = getBlockAt(cx, cy);
+    var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy);
     if (block) {
       hoverEl.style.display = 'block';
       hoverEl.style.left = block.sx + 'px';
@@ -965,7 +867,6 @@
       var txt = '—';
       if (info) {
         if (S.layer === 'radar') {
-          // Показываем точное значение, если есть, иначе порог
           if (block.dbz >= 0) {
             txt = Math.round(block.dbz) + ' dBZ | ' + info.label;
           } else {
@@ -975,13 +876,9 @@
           txt = info.label;
         }
       }
-      crosshairLbl.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' +
-        block.color + ';border:1px solid #000;vertical-align:middle;margin-right:6px"></span>' + txt;
+      crosshairLbl.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + block.color + ';border:1px solid #000;vertical-align:middle;margin-right:6px"></span>' + txt;
       crosshairLbl.style.display = 'block';
-      var lw = crosshairLbl.offsetWidth || 200,
-        lh = crosshairLbl.offsetHeight || 36,
-        lx = cx - lw / 2,
-        ly = cy - 50 - lh;
+      var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh;
       if (ly < 8) ly = cy + 50;
       crosshairLbl.style.left = lx + 'px';
       crosshairLbl.style.top = ly + 'px';
@@ -997,12 +894,7 @@
   function toggleCrosshair() {
     crosshairMode = !crosshairMode;
     var btn = $('btn-crosshair');
-    if (crosshairMode) { btn.classList.add('on');
-      crosshairEl.style.display = 'block';
-      updateCrosshair(); } else { btn.classList.remove('on');
-      crosshairEl.style.display = 'none';
-      crosshairLbl.style.display = 'none';
-      hoverEl.style.display = 'none'; }
+    if (crosshairMode) { btn.classList.add('on'); crosshairEl.style.display = 'block'; updateCrosshair(); } else { btn.classList.remove('on'); crosshairEl.style.display = 'none'; crosshairLbl.style.display = 'none'; hoverEl.style.display = 'none'; }
     if (S.ruler.active) toggleRuler();
   }
 
@@ -1013,8 +905,7 @@
     if (info) {
       if (S.layer === 'radar') {
         if (block.dbz >= 0) {
-          meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info
-            .label;
+          meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info.label;
         } else {
           meta = 'Слой: <b>Отражаемость</b><br>Порог: ≥' + info.v + ' dBZ<br>Категория: ' + info.label;
         }
@@ -1024,15 +915,12 @@
     } else {
       meta = 'Нет данных';
     }
-    popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color +
-      '"></div><div class="popup-label">' + lbl +
-      '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+    popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color + '"></div><div class="popup-label">' + lbl + '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
     popupEl.style.display = 'block';
     popupEl.classList.remove('popup-in');
     void popupEl.offsetWidth;
     popupEl.classList.add('popup-in');
-    var px2 = mx + 16,
-      py2 = my - 55;
+    var px2 = mx + 16, py2 = my - 55;
     if (px2 + 230 > innerWidth - 8) px2 = mx - 246;
     if (py2 < 8) py2 = 8;
     if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118;
@@ -1041,33 +929,26 @@
     popupVisible = true;
   }
 
-  function hidePopup() { popupEl.style.display = 'none';
-    popupVisible = false; }
+  function hidePopup() { popupEl.style.display = 'none'; popupVisible = false; }
 
   map.on('mousemove', function(e) {
     if (crosshairMode) return;
-    var p = e.containerPoint,
-      block = getBlockAt(p.x, p.y);
-    if (block) { hoverEl.style.display = 'block';
-      hoverEl.style.left = block.sx + 'px';
-      hoverEl.style.top = block.sy + 'px';
-      hoverEl.style.width = block.sw + 'px';
-      hoverEl.style.height = block.sh + 'px';
-      hoverEl.style.background = block.color; } else hoverEl.style.display = 'none';
+    var p = e.containerPoint, block = getBlockAt(p.x, p.y);
+    if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none';
   });
   map.on('click', function(e) {
     if (S.ruler.active) return;
-    var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint,
-      block = getBlockAt(p.x, p.y);
+    var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint, block = getBlockAt(p.x, p.y);
     block ? showPopup(block, p.x, p.y) : hidePopup();
   });
 
-  // ─── МОДАЛЬНОЕ ОКНО ПАЛИТР (без изменений) ──────────────
+  // ─── МОДАЛЬНОЕ ОКНО ПАЛИТР ──────────────
   var modal = $('palette-modal'),
     modalClose = $('modal-close'),
     modalTabs = document.querySelectorAll('.modal-tabs button'),
     paletteListContainer = $('palette-list-container'),
     loadPaletteBtn = $('load-palette-btn'),
+    exportPaletteBtn = $('export-palette-btn'), // Получаем кнопку экспорта
     fileInput = $('file-input'),
     createPaletteBtn = $('create-palette-btn'),
     deletePaletteBtn = $('delete-palette-btn'),
@@ -1112,13 +993,10 @@
     list.forEach(function(p, idx) {
       var activeClass = idx === activeIdx ? 'active' : '';
       var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : '';
-      var editBtn = p.builtin ? '' :
-        '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>';
+      var editBtn = p.builtin ? '' : '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>';
       html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' +
         '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' +
-        '<div>' + editBtn +
-        (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') +
-        '</div></div>';
+        '<div>' + editBtn + (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') + '</div></div>';
     });
     paletteListContainer.innerHTML = html;
 
@@ -1129,10 +1007,7 @@
         palettes[currentLayerForModal].activeIdx = idx;
         savePalettesToStorage(currentLayerForModal);
         renderPaletteList();
-        if (currentLayerForModal === S.layer) {
-          buildLegend();
-          forceRefresh();
-        }
+        if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); }
       });
     });
 
@@ -1152,15 +1027,11 @@
         if (list2[idx].builtin) return;
         if (confirm('Удалить палитру "' + list2[idx].name + '"?')) {
           list2.splice(idx, 1);
-          if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx =
-            list2.length - 1;
+          if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx = list2.length - 1;
           if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0;
           savePalettesToStorage(currentLayerForModal);
           renderPaletteList();
-          if (currentLayerForModal === S.layer) {
-            buildLegend();
-            forceRefresh();
-          }
+          if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); }
         }
       });
     });
@@ -1239,12 +1110,7 @@
         var newLabel = labelInput.value.trim() || 'без метки';
         var rgb = hexToRgb(newColor);
         if (!rgb) { toast('Неверный цвет'); return; }
-        tempEntries[idx] = {
-          val: newVal,
-          color: newColor,
-          label: newLabel,
-          r: rgb
-        };
+        tempEntries[idx] = { val: newVal, color: newColor, label: newLabel, r: rgb };
         editingEntryIndex = -1;
         renderEntries();
       });
@@ -1293,9 +1159,7 @@
     var name = newPalName.value.trim() || 'Без названия';
     if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; }
     var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; });
-    var items = sorted.map(function(e) {
-      return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label };
-    });
+    var items = sorted.map(function(e) { return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label }; });
 
     if (editingIndex >= 0) {
       var list = palettes[currentLayerForModal].list;
@@ -1306,8 +1170,7 @@
       savePalettesToStorage(currentLayerForModal);
       renderPaletteList();
       if (currentLayerForModal === S.layer && palettes[currentLayerForModal].activeIdx === editingIndex) {
-        buildLegend();
-        forceRefresh();
+        buildLegend(); forceRefresh();
       }
       toast('Палитра "' + name + '" обновлена');
       closeForm();
@@ -1317,15 +1180,55 @@
       palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1;
       savePalettesToStorage(currentLayerForModal);
       renderPaletteList();
-      if (currentLayerForModal === S.layer) {
-        buildLegend();
-        forceRefresh();
-      }
+      if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); }
       toast('Палитра "' + name + '" сохранена');
       closeForm();
     }
   }
 
+  // ─── ЭКСПОРТ ПАЛИТРЫ (новый формат) ──────────────────────
+  function exportPalette() {
+    var layer = currentLayerForModal || S.layer;
+    var list = palettes[layer].list;
+    var idx = palettes[layer].activeIdx;
+    if (!list || list.length === 0 || idx >= list.length) {
+      toast('Нет палитры для экспорта');
+      return;
+    }
+    var pal = list[idx];
+    var content = generatePalFile(pal.items, pal.name, layer);
+    var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (pal.name || 'palette') + '.pal';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Палитра "' + pal.name + '" экспортирована');
+  }
+
+  function generatePalFile(items, name, layer) {
+    // Сортируем по возрастанию значения v
+    var sorted = items.slice().sort(function(a, b) { return a.v - b.v; });
+    var lines = [];
+    lines.push('Product: ' + (layer === 'radar' ? 'BR' : 'WX'));
+    lines.push('Units: dBZ');
+    lines.push('Scale: 1');
+    lines.push('Offset: 0');
+    lines.push('Step: 5');
+    lines.push('RF: 0 0 0');
+    lines.push(''); // пустая строка
+    for (var i = 0; i < sorted.length; i++) {
+      var p = sorted[i];
+      var r = p.r[0], g = p.r[1], b = p.r[2];
+      lines.push('Color: ' + p.v + ' ' + r + ' ' + g + ' ' + b);
+    }
+    return lines.join('\n');
+  }
+
+  // ─── ЗАГРУЗКА ИЗ ФАЙЛА (с поддержкой нового формата) ──
   function loadPaletteFromFile(file) {
     var reader = new FileReader();
     reader.onload = function(e) {
@@ -1353,42 +1256,110 @@
   }
 
   function parsePaletteFile(text) {
+    // 1. Попытка распарсить как JSON
     try {
       var parsed = JSON.parse(text);
       if (Array.isArray(parsed) && parsed.length && parsed[0].v !== undefined && parsed[0].r && parsed[0].l) {
         return parsed;
       }
     } catch (e) {}
+
+    // 2. Попытка распарсить как GRLevelX .pal
     var lines = text.split(/\r?\n/).filter(function(line) { return line.trim().length > 0; });
     var items = [];
+    var inTable = false;
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
-      var parts = line.split(/\s*,\s*/);
-      if (parts.length >= 5) {
-        var v = parseFloat(parts[0]);
-        if (isNaN(v)) continue;
-        var r = parseInt(parts[1]),
-          g = parseInt(parts[2]),
-          b = parseInt(parts[3]);
-        if (isNaN(r) || isNaN(g) || isNaN(b)) continue;
-        var label = parts.slice(4).join(',').trim() || 'без метки';
-        items.push({ v: v, r: [r, g, b], l: label });
-      } else {
-        var m = line.match(/^([\d.]+)\s+#([a-fA-F0-9]{6})\s+(.+)$/);
-        if (m) {
-          var v2 = parseFloat(m[1]);
-          if (isNaN(v2)) continue;
-          var rgb2 = hexToRgb('#' + m[2]);
-          if (!rgb2) continue;
-          items.push({ v: v2, r: [rgb2.r, rgb2.g, rgb2.b], l: m[3].trim() });
+      if (/^ColorTable\s*\{/.test(line)) { inTable = true; continue; }
+      if (/^\}/.test(line)) { inTable = false; continue; }
+      if (!inTable) continue;
+      var match = line.match(/Color\s*\[\s*([\d.]+)\s*\]\s*=\s*(rgb|gradient)\s*\(\s*([^)]+)\s*\)/i);
+      if (match) {
+        var v = parseFloat(match[1]);
+        var type = match[2].toLowerCase();
+        var params = match[3].split(/\s*,\s*/).filter(function(s) { return s.length > 0; });
+        if (type === 'rgb' && params.length >= 3) {
+          var r = parseInt(params[0]);
+          var g = parseInt(params[1]);
+          var b = parseInt(params[2]);
+          if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+            items.push({ v: v, r: [r, g, b], l: '>= ' + v + ' dBZ' });
+          }
+        } else if (type === 'gradient' && params.length >= 6) {
+          var r2 = parseInt(params[1]), g2 = parseInt(params[2]), b2 = parseInt(params[3]);
+          if (!isNaN(r2) && !isNaN(g2) && !isNaN(b2)) {
+            items.push({ v: v, r: [r2, g2, b2], l: '>= ' + v + ' dBZ' });
+          }
         }
       }
     }
-    if (items.length === 0) return null;
-    items.sort(function(a, b) { return b.v - a.v; });
-    return items;
+    if (items.length > 0) {
+      items.sort(function(a, b) { return b.v - a.v; });
+      return items;
+    }
+
+    // 3. Попытка распарсить как новый формат "Product: ..." и "Color: ..."
+    var colorLines = [];
+    var product = null;
+    for (var j = 0; j < lines.length; j++) {
+      var line2 = lines[j].trim();
+      if (/^Product:/i.test(line2)) {
+        product = line2;
+      }
+      if (/^Color:/i.test(line2)) {
+        colorLines.push(line2);
+      }
+    }
+    if (colorLines.length > 0) {
+      var newItems = [];
+      for (var k = 0; k < colorLines.length; k++) {
+        var parts = colorLines[k].split(/\s+/);
+        // Формат: "Color: значение R G B"
+        if (parts.length >= 5) {
+          var val = parseFloat(parts[1]);
+          var r3 = parseInt(parts[2]);
+          var g3 = parseInt(parts[3]);
+          var b3 = parseInt(parts[4]);
+          if (!isNaN(val) && !isNaN(r3) && !isNaN(g3) && !isNaN(b3)) {
+            newItems.push({ v: val, r: [r3, g3, b3], l: val + ' dBZ' });
+          }
+        }
+      }
+      if (newItems.length > 0) {
+        newItems.sort(function(a, b) { return b.v - a.v; });
+        return newItems;
+      }
+    }
+
+    // 4. Попытка распарсить как CSV/текстовый формат
+    var csvItems = [];
+    for (var m = 0; m < lines.length; m++) {
+      var line3 = lines[m].trim();
+      var parts2 = line3.split(/\s*,\s*/);
+      if (parts2.length >= 5) {
+        var v2 = parseFloat(parts2[0]);
+        if (isNaN(v2)) continue;
+        var r4 = parseInt(parts2[1]), g4 = parseInt(parts2[2]), b4 = parseInt(parts2[3]);
+        if (isNaN(r4) || isNaN(g4) || isNaN(b4)) continue;
+        var label = parts2.slice(4).join(',').trim() || 'без метки';
+        csvItems.push({ v: v2, r: [r4, g4, b4], l: label });
+      } else {
+        var m2 = line3.match(/^([\d.]+)\s+#([a-fA-F0-9]{6})\s+(.+)$/);
+        if (m2) {
+          var v3 = parseFloat(m2[1]);
+          if (isNaN(v3)) continue;
+          var rgb = hexToRgb('#' + m2[2]);
+          if (!rgb) continue;
+          csvItems.push({ v: v3, r: [rgb.r, rgb.g, rgb.b], l: m2[3].trim() });
+        }
+      }
+    }
+    if (csvItems.length === 0) return null;
+    csvItems.sort(function(a, b) { return b.v - a.v; });
+    return csvItems;
   }
 
+  // ─── ПРИВЯЗКА КНОПОК И ИНИЦИАЛИЗАЦИЯ ────────────────────
   modalClose.addEventListener('click', closeModal);
 
   modalTabs.forEach(function(btn) {
@@ -1408,6 +1379,9 @@
     this.value = '';
   });
 
+  // Привязываем функцию экспорта к кнопке
+  exportPaletteBtn.addEventListener('click', exportPalette);
+
   createPaletteBtn.addEventListener('click', function() {
     closeForm();
     editingIndex = -1;
@@ -1419,9 +1393,7 @@
     savePaletteBtn.textContent = '💾 Сохранить';
   });
 
-  cancelCreateBtn.addEventListener('click', function() {
-    closeForm();
-  });
+  cancelCreateBtn.addEventListener('click', function() { closeForm(); });
 
   addEntryBtn.addEventListener('click', addEntry);
   document.querySelectorAll('#entry-val, #entry-label').forEach(function(inp) {
@@ -1437,15 +1409,11 @@
     if (list[idx].builtin) { toast('Нельзя удалить встроенную палитру'); return; }
     if (confirm('Удалить активную палитру "' + list[idx].name + '"?')) {
       list.splice(idx, 1);
-      if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list
-        .length - 1;
+      if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list.length - 1;
       if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0;
       savePalettesToStorage(currentLayerForModal);
       renderPaletteList();
-      if (currentLayerForModal === S.layer) {
-        buildLegend();
-        forceRefresh();
-      }
+      if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); }
     }
   });
 
@@ -1471,8 +1439,7 @@
   $('b-minus1h').addEventListener('click', function() { shiftTs(-3600); });
   $('b-minus10m').addEventListener('click', function() { shiftTs(-600); });
   $('b-plus10m').addEventListener('click', function() { shiftTs(600); });
-  $('toggle-legend-btn').addEventListener('click', function(e) { e.stopPropagation();
-    toggleLegend(); });
+  $('toggle-legend-btn').addEventListener('click', function(e) { e.stopPropagation(); toggleLegend(); });
   $('legend-header').addEventListener('click', toggleLegend);
 
   var smoothSlider = $('smooth-strength');
