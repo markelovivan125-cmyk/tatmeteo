@@ -1,7 +1,0 @@
-{
-  "name": "radar-vercel",
-  "version": "1.0.0",
-  "dependencies": {
-    "@vercel/kv": "^0.2.3"
-  }
-}
