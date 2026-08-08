@@ -465,4 +465,159 @@ var mins=Math.round(ad/60),hours=Math.floor(mins/60),rm=mins%60,text='';
 if(hours>0){text=hours+'ч';if(rm>0)text+=' '+rm+'м'}else text=mins+'м';
 return diff<0?{text:'−'+text+' назад',cls:'past'}:{text:'+'+text+' вперёд',cls:'future'}}
 function showTimeTooltip(ts,pct){var d=new Date(ts*1000),ts2=d.toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),
-ds=d.toLocaleDateString('ru',{day:'2-digit',month:'short'}),
+ds=d.toLocaleDateString('ru',{day:'2-digit',month:'short'}),di=formatTimeDiff(ts);
+timeTooltip.innerHTML='<div class="tt-time">'+ts2+'</div><div class="tt-date">'+ds+'</div><div class="tt-diff '+di.cls+'">'+di.text+'</div>';
+timeTooltip.style.left=pct+'%';timeTooltip.classList.add('visible')}
+function hideTimeTooltip(){timeTooltip.classList.remove('visible')}
+
+function updateCurrentSource() {
+    if (S.layer === 'rv-sat') updateRVLayer();
+    else { forceRefresh(); }
+}
+
+ $('track').addEventListener('pointerdown',function(e){if(!S.frames.length)return;drag=true;var ts=tsFromX(e.clientX),pct=pctFromX(e.clientX);S.ts=ts;updateCurrentSource();showTimeTooltip(ts,pct);this.setPointerCapture(e.pointerId)});
+ $('track').addEventListener('pointermove',function(e){if(drag){var ts=tsFromX(e.clientX),pct=pctFromX(e.clientX);S.ts=ts;updateCurrentSource();showTimeTooltip(ts,pct)}});
+document.addEventListener('pointerup',function(){if(drag){drag=false;hideTimeTooltip()}});
+ $('track').addEventListener('mousemove',function(e){if(!drag&&S.frames.length)showTimeTooltip(tsFromX(e.clientX),pctFromX(e.clientX))});
+ $('track').addEventListener('mouseleave',function(){if(!drag)hideTimeTooltip()});
+
+/* ══════════════════════════════════════════
+   PLAYBACK & SHIFT
+══════════════════════════════════════════ */
+function animMs(){return 900/S.speeds[S.speedI]}
+function togglePlay(){S.playing?stopPlay():startPlay()}
+function startPlay(){if(!S.frames.length)return;S.frameI=0;S.timer=setInterval(function(){S.frameI=(S.frameI+1)%S.frames.length;S.ts=S.frames[S.frameI];updateCurrentSource();},animMs());S.playing=true;$('playbtn').innerHTML='&#x25A0;'}
+function stopPlay(){clearInterval(S.timer);S.timer=null;S.playing=false;$('playbtn').innerHTML='&#x25B6;'}
+function cycleSpeed(){S.speedI=(S.speedI+1)%S.speeds.length;$('spd').textContent=S.speeds[S.speedI]+'x';if(S.playing){stopPlay();startPlay()}}
+
+function shiftTs(secondsDelta) {
+    stopPlay();
+    if(!S.frames.length) return;
+    var targetTs = S.ts + secondsDelta;
+    var closest = S.frames.reduce(function(prev, curr) {
+        return (Math.abs(curr - targetTs) < Math.abs(prev - targetTs) ? curr : prev);
+    });
+    if (closest === S.ts) {
+        toast('⚠️ Достигнут предел истории');
+        return;
+    }
+    S.ts = closest;
+    updateCurrentSource();
+    toast('⏱ ' + new Date(S.ts*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'}));
+}
+
+function doRefresh() {
+    toast('Обновление...');
+    if (S.layer === 'rv-sat') fetchRainViewerMeta();
+    else { setTime(nowTs(),false); buildFrames(); forceRefresh(); }
+}
+
+function forceRefresh(){S.cache.clear();S.failed.clear();S.pending.clear();S.loadN=0;$('pulse').classList.remove('busy');schedRender()}
+
+/* ══════════════════════════════════════════
+   LAYER MENU LOGIC
+══════════════════════════════════════════ */
+var layerMenu = $('layer-menu');
+ $('btn-layer-menu').addEventListener('click', function(e) {
+    e.stopPropagation();
+    layerMenu.classList.toggle('visible');
+});
+
+document.addEventListener('click', function(e) {
+    if (!layerMenu.contains(e.target) && e.target.id !== 'btn-layer-menu') {
+        layerMenu.classList.remove('visible');
+    }
+});
+
+document.querySelectorAll('.dd-item').forEach(function(item) {
+    item.addEventListener('click', function() {
+        var newLayer = this.dataset.layer;
+        if (newLayer === S.layer) {
+            layerMenu.classList.remove('visible');
+            return;
+        }
+        
+        S.layer = newLayer;
+        
+        document.querySelectorAll('.dd-item').forEach(function(el) { el.classList.remove('active'); });
+        this.classList.add('active');
+        layerMenu.classList.remove('visible');
+        
+        if (rvSatLayer) { map.removeLayer(rvSatLayer); rvSatLayer = null; }
+        canvas.style.display = 'none';
+        
+        if (S.layer.startsWith('rr-')) {
+            S.px = SCALES[scaleIdx].px;
+            S.cache.clear(); S.pending.clear(); S.failed.clear();
+            canvas.style.display = 'block';
+            buildFrames();
+            forceRefresh();
+            buildLegend(S.layer === 'rr-radar' ? 'radar' : 'wx');
+        } else {
+            buildLegend(S.layer);
+            fetchRainViewerMeta();
+        }
+    });
+});
+
+function buildLegend(type) {
+    var el=$('lbody');el.innerHTML='';
+    var items = type === 'radar' ? RPAL : (type === 'wx' ? PPAL : []);
+    
+    if (type === 'rv-sat') {
+        $('ltitle').textContent = 'СПУТНИК IR (RAINVIEWER)';
+        el.innerHTML = '<div class="li"><div class="lsq" style="background:#fff"></div><span>Очень холодные вершины (Грозы)</span></div><div class="li"><div class="lsq" style="background:#999"></div><span>Умеренные облака</span></div><div class="li"><div class="lsq" style="background:#333"></div><span>Тепло / Земля</span></div>';
+        return;
+    }
+    
+    $('ltitle').textContent = type === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ';
+    items.forEach(function(p){var row=document.createElement('div');row.className='li';var sq=document.createElement('div');sq.className='lsq';
+    sq.style.background='rgb('+p.r+')';if(!p.r[0]&&!p.r[1]&&!p.r[2])sq.style.border='1px solid #555';
+    var t=document.createElement('span');t.textContent=p.l;row.appendChild(sq);row.appendChild(t);el.appendChild(row)});
+}
+
+function toggleLegend(){var lg=$('legend'),btn=$('toggle-legend-btn');if(S.legendVis){lg.classList.add('collapsed');btn.innerHTML='+'}else{lg.classList.remove('collapsed');btn.innerHTML='−'}S.legendVis=!S.legendVis}
+var toastTmr;function toast(m){var el=$('dbg');clearTimeout(toastTmr);el.style.color='#7ab4ff';el.textContent=m;toastTmr=setTimeout(function(){el.style.color='';doRender()},3000)}
+
+/* ══════════════════════════════════════════
+   CROSSHAIR
+══════════════════════════════════════════ */
+var hoverEl=$('hover-indicator'),crosshairEl=$('crosshair'),crosshairLbl=$('crosshair-label');
+var crosshairMode=false;
+function updateCrosshair(){if(!crosshairMode||!S.layer.startsWith('rr'))return;var cx=innerWidth/2,cy=innerHeight/2,block=getBlockAt(cx,cy);
+if(block){hoverEl.style.display='block';hoverEl.style.left=block.sx+'px';hoverEl.style.top=block.sy+'px';hoverEl.style.width=block.sw+'px';hoverEl.style.height=block.sh+'px';hoverEl.style.background='transparent';
+crosshairLbl.innerHTML='<span style="color:#fff">'+block.color+'</span>';
+crosshairLbl.style.display='block';var lw=crosshairLbl.offsetWidth||200,lh=crosshairLbl.offsetHeight||36,lx=cx-lw/2,ly=cy-50-lh;if(ly<8)ly=cy+50;
+crosshairLbl.style.left=lx+'px';crosshairLbl.style.top=ly+'px'}
+else{hoverEl.style.display='none';crosshairLbl.innerHTML='<span style="color:#888">нет данных</span>';crosshairLbl.style.display='block';
+crosshairLbl.style.left=(innerWidth/2-(crosshairLbl.offsetWidth||120)/2)+'px';crosshairLbl.style.top=(innerHeight/2-60)+'px'}}
+function toggleCrosshair(){crosshairMode=!crosshairMode;var btn=$('btn-crosshair');
+if(crosshairMode){btn.classList.add('on');crosshairEl.style.display='block';updateCrosshair()}
+else{btn.classList.remove('on');crosshairEl.style.display='none';crosshairLbl.style.display='none';hoverEl.style.display='none'}}
+
+/* ══════════════════════════════════════════
+   BUTTONS & INIT
+══════════════════════════════════════════ */
+ $('playbtn').addEventListener('click',togglePlay);
+ $('spd').addEventListener('click',cycleSpeed);
+ $('btn-refresh').addEventListener('click',doRefresh);
+ $('btn-crosshair').addEventListener('click',toggleCrosshair);
+ $('b-minus1h').addEventListener('click',function(){shiftTs(-3600)});
+ $('b-minus10m').addEventListener('click',function(){shiftTs(-600)});
+ $('b-plus10m').addEventListener('click',function(){shiftTs(600)});
+ $('toggle-legend-btn').addEventListener('click',function(e){e.stopPropagation();toggleLegend()});
+ $('legend-header').addEventListener('click',toggleLegend);
+
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){ if(crosshairMode){toggleCrosshair();return} }
+});
+map.on('move moveend zoomend',function(){if(crosshairMode)updateCrosshair()});
+
+buildLegend('radar');
+buildFrames();
+updThumb();
+schedRender();
+
+setInterval(function(){if(!S.playing&&!S.manualTime&&S.layer!=='rv-sat'){var n=nowTs();if(n!==S.ts){S.ts=n;updThumb();forceRefresh();toast('Новые данные')}}buildFrames();},60000);
+
+})();
