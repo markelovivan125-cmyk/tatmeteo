@@ -3,18 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Baltrad | Радар</title>
+<title>2х2 | Радар</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 <div id="map"></div>
+<canvas id="radar"></canvas>
 
 <!-- CTRL -->
 <div class="panel" id="ctrl">
-  <button class="btn on" id="btn-layer">Слой: RAIN</button><div class="sep"></div>
-  <button class="btn" id="btn-refresh">↺ Обновить</button><button class="btn" id="spd">1×</button><div class="sep"></div>
-  <button class="btn" id="btn-locate" title="Мое местоположение">📍</button>
+  <button class="btn on" id="btn-layer">Отражаемость</button><div class="sep"></div>
+  <button class="btn" id="btn-refresh">↺ Сейчас</button><button class="btn" id="spd">1×</button><div class="sep"></div>
+  <button class="btn" id="btn-crosshair">⊕ Прицел</button>
   <div class="sep"></div>
   <button class="btn" style="background:0 0;border:0;color:#888;font-size:15px;padding:4px 6px" title="Скрыть панель" onclick="closePanel('ctrl')">✕</button>
 </div>
@@ -23,15 +24,13 @@
 <!-- LEGEND -->
 <div class="panel" id="legend">
   <div id="legend-header">
-    <h3 id="ltitle">ЛЕГЕНДА</h3>
+    <h3 id="ltitle">ОТРАЖАЕМОСТЬ dBZ</h3>
     <div style="display:flex;align-items:center;gap:4px">
       <button id="toggle-legend-btn">−</button>
       <button style="background:0 0;border:0;color:#888;font-size:15px" onclick="closePanel('legend')" title="Скрыть">✕</button>
     </div>
   </div>
-  <div id="lbody">
-    <img id="legend-img" alt="Легенда недоступна">
-  </div>
+  <div id="lbody"></div>
 </div>
 <button class="restore-btn" id="restore-legend" style="bottom:80px;right:14px" onclick="restorePanel('legend')">📊 Легенда</button>
 
@@ -53,7 +52,10 @@
 
 <div id="pulse"></div>
 <div id="dbg"></div>
-<div id="url-debug"></div>
+<div id="hover-indicator"></div>
+<div id="pixel-popup"></div>
+<div id="crosshair"><div class="ch-h"></div><div class="ch-v"></div><div class="ch-dot"></div></div>
+<div id="crosshair-label"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="script.js"></script>
