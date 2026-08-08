@@ -77,7 +77,7 @@ function setTime(t,m){S.ts=Math.max(minTs(),Math.min(t,nowTs()));S.manualTime=!!
 var $=function(id){return document.getElementById(id)};
 
 /* ══════════════════════════════════════════
-   MAP
+   MAP (Спутник Esri)
 ══════════════════════════════════════════ */
 var map=L.map('map',{
   center:[57,55],
@@ -94,10 +94,9 @@ var map=L.map('map',{
   keyboard:false
 });
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  subdomains: 'abcd',
-  maxZoom: 20,
-  detectRetina: true
+// Спутниковые снимки Esri World Imagery
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19
 }).addTo(map);
 
 var canvas=$('radar'),ctx=canvas.getContext('2d');
@@ -144,8 +143,8 @@ var renderPend=false;
 function schedRender(){if(!renderPend){renderPend=true;requestAnimationFrame(doRender)}}
 function doRender(){renderPend=false;ctx.clearRect(0,0,canvas.width,canvas.height);var tiles=visTiles(),hit=0,miss=0;
 
-// Включаем сглаживание для радара (dBZ) и выключаем для ОЯ Явлений (рубленые клетки)
-ctx.imageSmoothingEnabled = (S.layer === 'radar'); 
+// Жестко отключаем сглаживание (рубленые пиксели)
+ctx.imageSmoothingEnabled = false; 
 
 for(var i=0;i<tiles.length;i++){var t=tiles[i],ck=CK(t.x,t.y),c=S.cache.get(ck);
 if(c){var r=tileRect(t.x,t.y);if(r.sw>0&&r.sh>0){
@@ -204,19 +203,10 @@ function shiftTs(d){stopPlay();var n=Math.round((S.ts+d)/STEP)*STEP;var mn=minTs
 if(n<=mn)toast('⚠️ Максимум '+HISTORY_HOURS_LABEL+' назад');setTime(n,true);buildFrames();updHUD();S.failed.clear();forceRefresh();
 toast('⏱ '+new Date(S.ts*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'}))}
 
-/* ══════════════════════════════════════════
-   BLUR LAYER (СГЛАЖИВАНИЕ)
-══════════════════════════════════════════ */
-function applyCanvasBlur() {
-  // Применяем легкое размытие (2px) только для радара (dBZ). Для ОЯ Явления (wx) отключаем, чтобы сетка была четкой.
-  canvas.style.filter = (S.layer === 'radar') ? 'blur(2px)' : 'none';
-}
-
 function toggleLayer(){
   S.layer=S.layer==='radar'?'wx':'radar';
   $('btn-layer').textContent=S.layer==='radar'?'Отражаемость':'ОЯ Явления';
   S.px=1;S.cache.clear();S.pending.clear();S.failed.clear();buildLegend();forceRefresh();hidePopup();
-  applyCanvasBlur(); // Обновляем blur при смене слоя
 }
 function buildLegend(){var el=$('lbody');el.innerHTML='';var items=S.layer==='radar'?RPAL:PPAL;
  $('ltitle').textContent=S.layer==='radar'?'ОТРАЖАЕМОСТЬ dBZ':'ПОГОДНЫЕ ЯВЛЕНИЯ';
@@ -296,6 +286,5 @@ map.on('move moveend zoomend',function(){if(crosshairMode)updateCrosshair()});
    INIT
 ══════════════════════════════════════════ */
 buildLegend();buildFrames();updHUD();schedRender();
-applyCanvasBlur(); // Применяем размытие при старте (по умолчанию слой 'radar')
 
 })();
