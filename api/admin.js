@@ -1,17 +1,22 @@
-import { kv } from '@vercel/kv';
+=import Redis from 'ioredis';
+
+if (!global._redis) {
+  global._redis = new Redis(process.env.tatmeteostorage_REDIS_URL);
+}
+const redis = global._redis;
 
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
-      const passwords = await kv.smembers('passwords');
-      const logs = await kv.lrange('logs', 0, 19);
+      const passwords = await redis.smembers('passwords');
+      const logs = await redis.lrange('logs', 0, 19);
 
       const passStatus = [];
       for (const p of passwords) {
-        const keys = await kv.keys(`sess:${p}:*`);
+        const keys = await redis.keys(`sess:${p}:*`);
         let ips = [];
         for (const k of keys) {
-          const ip = await kv.get(k);
+          const ip = await redis.get(k);
           if (ip) ips.push(ip);
         }
         passStatus.push({ 
@@ -29,15 +34,15 @@ export default async function handler(req, res) {
 
       if (action === 'generate') {
         const newPass = Math.random().toString(36).slice(2, 10);
-        await kv.sadd('passwords', newPass);
+        await redis.sadd('passwords', newPass);
         return res.json({ success: true, password: newPass });
       }
 
       if (action === 'delete') {
-        await kv.srem('passwords', password);
-        const keys = await kv.keys(`sess:${password}:*`);
+        await redis.srem('passwords', password);
+        const keys = await redis.keys(`sess:${password}:*`);
         if (keys.length > 0) {
-          await kv.del(...keys);
+          await redis.del(...keys);
         }
         return res.json({ success: true });
       }
