@@ -12,6 +12,9 @@
         button { background:#4a7fe8; color:#fff; border:0; padding:12px; border-radius:8px; cursor:pointer; width:100%; font-weight:700; font-size:14px; }
         button:hover { background:#3a6fd8; }
         .error { color:#ff5252; font-size:12px; margin-top:10px; display:none; }
+        .captcha-box { display:flex; align-items:center; gap:10px; margin-bottom:15px; }
+        .captcha-box img { background:#1a1a1a; border-radius:8px; cursor:pointer; flex:1; height:50px; }
+        .captcha-box input { margin-bottom:0; text-transform:uppercase; }
     </style>
 </head>
 <body>
@@ -19,34 +22,42 @@
         <h2>2х2 | РАДАР</h2>
         <form id="loginForm">
             <input type="password" id="pass" placeholder="Введите пароль" required>
+            
+            <div class="captcha-box">
+                <div id="captcha-img" style="background:#1a1a1a; border-radius:8px; flex:1; height:50px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Обновить картинку"></div>
+                <input type="text" id="captcha" placeholder="Код" required style="width: 80px;">
+            </div>
+            
             <button type="submit">Войти</button>
             <div class="error" id="err"></div>
         </form>
     </div>
     <script>
-        // Функция генерации уникального ID для этого браузера
-        function getDeviceId() {
-            let id = localStorage.getItem('radar_device_id');
-            if (!id) {
-                id = 'dev-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-                localStorage.setItem('radar_device_id', id);
-            }
-            return id;
+        let currentCaptchaId = null;
+
+        async function loadCaptcha() {
+            const res = await fetch('/api/captcha');
+            const data = await res.json();
+            currentCaptchaId = data.id;
+            document.getElementById('captcha-img').innerHTML = data.svg;
         }
+
+        document.getElementById('captcha-img').addEventListener('click', loadCaptcha);
 
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const pass = document.getElementById('pass').value;
+            const captchaCode = document.getElementById('captcha').value;
             const errBox = document.getElementById('err');
             errBox.style.display = 'none';
 
-            // Отправляем пароль и ID устройства
             const res = await fetch('/api/auth?action=login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     password: pass,
-                    deviceId: getDeviceId()
+                    captchaId: currentCaptchaId,
+                    captchaCode: captchaCode
                 })
             });
             const data = await res.json();
@@ -56,8 +67,11 @@
             } else {
                 errBox.textContent = data.error;
                 errBox.style.display = 'block';
+                loadCaptcha(); // Перезагружаем капчу при ошибке
             }
         });
+
+        loadCaptcha(); // Загружаем при открытии
     </script>
 </body>
 </html>
