@@ -12,6 +12,7 @@
         .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
         .badge-0 { background: #333; color: #888; }
         .badge-1 { background: #b71c1c; color: #ef9a9a; }
+        .err { color: #ff5252; font-family: monospace; background: #2a0000; padding: 10px; border-radius: 5px; }
     </style>
 </head>
 <body>
@@ -21,32 +22,40 @@
 
     <script>
         async function load() {
-            const res = await fetch('/api/admin');
-            if (!res.ok) { document.getElementById('list').innerHTML = 'Ошибка загрузки данных'; return; }
-            const data = await res.json();
-            
-            let html = '<h2>Активные пароли:</h2><ul>';
-            if (data.passwords.length === 0) {
-                html += '<li>Паролей пока нет. Сгенерируйте новый.</li>';
-            }
-            data.passwords.forEach(p => {
-                const badgeClass = `badge-${p.activeDevices}`;
-                let statusText = `${p.activeDevices}/1 устр.`;
+            try {
+                const res = await fetch('/api/admin');
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({ error: 'Неизвестная ошибка сервера' }));
+                    document.getElementById('list').innerHTML = `<div class="err">Ошибка сервера: ${errData.error}<br><br>Проверьте, создана ли база данных KV в настройках Vercel!</div>`;
+                    return;
+                }
+                const data = await res.json();
                 
-                html += `<li>
-                    <b>${p.password}</b> 
-                    <span class="badge ${badgeClass}">${statusText}</span>
-                    <span style="color:#888; font-size:12px; margin-left:10px;">${p.ips || 'Нет подключений'}</span>
-                    <button class="del" style="float:right;" onclick="del('${p.password}')">Удалить</button>
-                </li>`;
-            });
-            html += '</ul><h2>Логи (последние 20):</h2><ul>';
-            if (data.logs.length === 0) {
-                html += '<li>Логов нет.</li>';
+                let html = '<h2>Активные пароли:</h2><ul>';
+                if (data.passwords.length === 0) {
+                    html += '<li>Паролей пока нет. Сгенерируйте новый.</li>';
+                }
+                data.passwords.forEach(p => {
+                    const badgeClass = `badge-${p.activeDevices}`;
+                    let statusText = `${p.activeDevices}/1 устр.`;
+                    
+                    html += `<li>
+                        <b>${p.password}</b> 
+                        <span class="badge ${badgeClass}">${statusText}</span>
+                        <span style="color:#888; font-size:12px; margin-left:10px;">${p.ips || 'Нет подключений'}</span>
+                        <button class="del" style="float:right;" onclick="del('${p.password}')">Удалить</button>
+                    </li>`;
+                });
+                html += '</ul><h2>Логи (последние 20):</h2><ul>';
+                if (data.logs.length === 0) {
+                    html += '<li>Логов нет.</li>';
+                }
+                data.logs.forEach(l => html += `<li>${l}</li>`);
+                html += '</ul>';
+                document.getElementById('list').innerHTML = html;
+            } catch (e) {
+                document.getElementById('list').innerHTML = `<div class="err">Сбой сети: ${e.message}</div>`;
             }
-            data.logs.forEach(l => html += `<li>${l}</li>`);
-            html += '</ul>';
-            document.getElementById('list').innerHTML = html;
         }
 
         document.getElementById('gen').onclick = async () => {
