@@ -6,7 +6,7 @@
   <title>2х2 | КиберРадар</title>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
+  
   <!-- Подключаем наши стили -->
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -20,7 +20,7 @@
     <div class="sep"></div>
     <button class="btn icon-btn" id="btn-refresh" title="Обновить">↻</button>
     <button class="btn" id="spd">1×</button>
-    <button class="btn" id="pxbtn">2 км</button> <!-- по умолчанию 2 км, не 1 км -->
+    <button class="btn" id="pxbtn">2 км</button>
     <button class="btn" id="btn-smooth">Сглаживание</button>
     <div id="smooth-control">
       <label>сила</label>
@@ -76,6 +76,7 @@
       <div id="palette-list-container" class="palette-list"></div>
       <div class="modal-actions">
         <button class="btn btn-primary" id="load-palette-btn">📂 Загрузить .pal</button>
+        <button class="btn" id="export-palette-btn">📤 Экспорт .pal</button>
         <button class="btn" id="create-palette-btn">➕ Создать</button>
         <button class="btn" id="delete-palette-btn" style="color:#ff6b6b;">🗑 Удалить</button>
       </div>
@@ -104,29 +105,5 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Подключаем наш скрипт -->
   <script src="script.js"></script>
-  <!-- Скрипт проверки авторизации -->
-<script>
-  // Проверяем, авторизован ли юзер. Если нет - кидаем на login.html
-  fetch('/api/me').then(r => r.json()).then(d => {
-    if (!d.auth) window.location.href = '/login.html';
-  }).catch(err => {
-    console.error('Ошибка проверки авторизации', err);
-    window.location.href = '/login.html'; // Если API упало, тоже кидаем на вход
-  });
-
-  // Пульс каждые 15 секунд (чтобы сервер знал, что мы еще тут)
-  setInterval(() => {
-    fetch('/api/auth?action=heartbeat', { method: 'POST' });
-  }, 15000);
-</script>
-
-<!-- Кнопка выхода (если ее еще нет в вашей панели управления) -->
-<button id="logout-btn" style="position:fixed;top:14px;right:40px;z-index:2000;background:rgba(20,20,20,.9);border:1px solid #444;color:#ff5252;padding:5px 10px;border-radius:6px;cursor:pointer;">Выйти</button>
-<script>
-  document.getElementById('logout-btn').addEventListener('click', async () => {
-    await fetch('/api/auth?action=logout', { method: 'POST' });
-    window.location.href = '/login.html';
-  });
-</script>
 </body>
 </html>
