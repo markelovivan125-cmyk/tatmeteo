@@ -95,9 +95,9 @@ function resizeCanvas(){canvas.width=innerWidth;canvas.height=innerHeight;schedR
 addEventListener('resize',resizeCanvas);resizeCanvas();
 
 /* ══════════════════════════════════════════
-   RAINVIEWER LOGIC
+   RAINVIEWER LOGIC (ONLY SAT)
 ══════════════════════════════════════════ */
-var rvSatLayer = null, rvPrecipLayer = null, rvMeta = null;
+var rvSatLayer = null, rvMeta = null;
 
 async function fetchRainViewerMeta() {
     $('pulse').classList.add('busy');
@@ -126,31 +126,18 @@ async function fetchRainViewerMeta() {
 function updateRVLayer() {
     if (!rvMeta || S.frames.length === 0) return;
     
-    var layerType = (S.layer === 'rv-sat') ? 'satellite' : 'radar';
-    var arr = rvMeta[layerType].past.slice();
-    if (layerType === 'radar' && rvMeta.radar.nowcast) {
-        arr = arr.concat(rvMeta.radar.nowcast);
-    }
-    
+    var arr = rvMeta.satellite.past.slice();
     var closest = arr.reduce(function(prev, curr) {
         return (Math.abs(curr.time - S.ts) < Math.abs(prev.time - S.ts) ? curr : prev);
     });
     S.ts = closest.time;
     
-    var color = (layerType === 'satellite') ? '0' : '1'; 
-    var url = `https://tilecache.rainviewer.com${closest.path}/256/{z}/{x}/{y}/${color}/1_1.png`;
+    var url = `https://tilecache.rainviewer.com${closest.path}/256/{z}/{x}/{y}/0/1_1.png`;
     
-    if (layerType === 'satellite') {
-        if (rvSatLayer) map.removeLayer(rvSatLayer);
-        rvSatLayer = L.tileLayer(url, { opacity: 0.85, tileSize: 256, zIndex: 400 }).addTo(map);
-        if (rvPrecipLayer) { map.removeLayer(rvPrecipLayer); rvPrecipLayer = null; }
-    } else {
-        if (rvPrecipLayer) map.removeLayer(rvPrecipLayer);
-        rvPrecipLayer = L.tileLayer(url, { opacity: 0.75, tileSize: 256, zIndex: 400 }).addTo(map);
-        if (rvSatLayer) { map.removeLayer(rvSatLayer); rvSatLayer = null; }
-    }
+    if (rvSatLayer) map.removeLayer(rvSatLayer);
+    rvSatLayer = L.tileLayer(url, { opacity: 0.85, tileSize: 256, zIndex: 400 }).addTo(map);
     
-    $('dbg').textContent = '⏱ ' + new Date(S.ts*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'}) + ' | ' + S.layer.toUpperCase();
+    $('dbg').textContent = '⏱ ' + new Date(S.ts*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'}) + ' | RV-SAT';
     updThumb();
 }
 
@@ -196,8 +183,8 @@ function doRender(){
   renderPend=false;
   ctx.clearRect(0,0,canvas.width,canvas.height);
   
-  if (S.layer === 'rv-sat' || S.layer === 'rv-precip') {
-    $('dbg').textContent = '⏱ ' + new Date(S.ts*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'}) + ' | ' + S.layer.toUpperCase();
+  if (S.layer === 'rv-sat') {
+    $('dbg').textContent = '⏱ ' + new Date(S.ts*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'}) + ' | RV-SAT';
     return;
   }
 
@@ -267,10 +254,114 @@ map.on('click', async function(e) {
 });
 
 /* ══════════════════════════════════════════
+   SNAPSHOT GENERATOR (Скачивание и копирование)
+══════════════════════════════════════════ */
+async function generateRFSnapshot() {
+    toast('⏳ Генерация снимка РФ...');
+    $('pulse').classList.add('busy');
+    
+    // Границы РФ (приблизительные)
+    var z = 5;
+    var x0 = lon2x(19.0, z);
+    var x1 = lon2x(180.0, z);
+    var y0 = lat2y(77.5, z);
+    var y1 = lat2y(41.0, z);
+    
+    var cols = x1 - x0 + 1;
+    var rows = y1 - y0 + 1;
+    
+    var cv = document.createElement('canvas');
+    cv.width = cols * 256;
+    cv.height = rows * 256;
+    var cctx = cv.getContext('2d');
+    cctx.fillStyle = '#0a0a0a'; // Темный фон
+    cctx.fillRect(0, 0, cv.width, cv.height);
+    
+    var promises = [];
+    
+    for (var x = x0; x <= x1; x++) {
+        for (var y = y0; y <= y1; y++) {
+            (function(tx, ty) {
+                promises.push(new Promise(function(resolve) {
+                    var img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    var url;
+                    
+                    if (S.layer.startsWith('rr-')) {
+                        url = SRC + '/' + S.ts + '/' + z + '/' + tx + '_' + ty + '.png';
+                    } else if (S.layer === 'rv-sat' && rvMeta) {
+                        var arr = rvMeta.satellite.past.slice();
+                        var closest = arr.reduce(function(p, c) {
+                            return (Math.abs(c.time - S.ts) < Math.abs(p.time - S.ts) ? c : p);
+                        });
+                        url = 'https://tilecache.rainviewer.com' + closest.path + '/256/' + z + '/' + tx + '/' + ty + '/0/1_1.png';
+                    } else {
+                        resolve();
+                        return;
+                    }
+                    
+                    img.onload = function() {
+                        var drawX = (tx - x0) * 256;
+                        var drawY = (ty - y0) * 256;
+                        
+                        if (S.layer.startsWith('rr-')) {
+                            try {
+                                var procCv = processTile(img, S.layer, S.px);
+                                cctx.drawImage(procCv, drawX, drawY);
+                            } catch(e) {
+                                // ignore CORS/tile errors
+                            }
+                        } else {
+                            cctx.drawImage(img, drawX, drawY);
+                        }
+                        resolve();
+                    };
+                    img.onerror = function() { resolve(); };
+                    img.src = url;
+                }));
+            })(x, y);
+        }
+    }
+    
+    await Promise.all(promises);
+    $('pulse').classList.remove('busy');
+    
+    cv.toBlob(function(blob) {
+        if (!blob) {
+            toast('❌ Ошибка генерации (CORS?)');
+            return;
+        }
+        
+        // 1. Скачивание
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'radar_rf_' + S.layer + '_' + S.ts + '.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        // 2. Копирование в буфер
+        if (navigator.clipboard && navigator.clipboard.write) {
+            navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': blob })
+            ]).then(function() {
+                toast('✅ Сохранено и скопировано в буфер!');
+            }).catch(function() {
+                toast('✅ Сохранено (копирование откл. браузером)');
+            });
+        } else {
+            toast('✅ Снимок сохранен');
+        }
+    }, 'image/png');
+}
+
+ $('btn-snapshot').addEventListener('click', generateRFSnapshot);
+
+/* ══════════════════════════════════════════
    TIMELINE UI
 ══════════════════════════════════════════ */
 function buildFrames() {
-    if (S.layer.startsWith('rv')) return;
+    if (S.layer === 'rv-sat') return;
     var mx=nowTs(),from=mx-MAX_HISTORY_SEC,frames=[];for(var t=from;t<=mx;t+=STEP)frames.push(t);
     S.frames=frames;
     buildFramesUI();
@@ -306,7 +397,7 @@ timeTooltip.style.left=pct+'%';timeTooltip.classList.add('visible')}
 function hideTimeTooltip(){timeTooltip.classList.remove('visible')}
 
 function updateCurrentSource() {
-    if (S.layer.startsWith('rv')) updateRVLayer();
+    if (S.layer === 'rv-sat') updateRVLayer();
     else { forceRefresh(); }
 }
 
@@ -343,7 +434,7 @@ function shiftTs(secondsDelta) {
 
 function doRefresh() {
     toast('Обновление...');
-    if (S.layer.startsWith('rv')) fetchRainViewerMeta();
+    if (S.layer === 'rv-sat') fetchRainViewerMeta();
     else { setTime(nowTs(),false); buildFrames(); forceRefresh(); }
 }
 
@@ -374,14 +465,11 @@ document.querySelectorAll('.dd-item').forEach(function(item) {
         
         S.layer = newLayer;
         
-        // Обновление активного класса
         document.querySelectorAll('.dd-item').forEach(function(el) { el.classList.remove('active'); });
         this.classList.add('active');
         layerMenu.classList.remove('visible');
         
-        // Очистка слоев
         if (rvSatLayer) { map.removeLayer(rvSatLayer); rvSatLayer = null; }
-        if (rvPrecipLayer) { map.removeLayer(rvPrecipLayer); rvPrecipLayer = null; }
         canvas.style.display = 'none';
         
         if (S.layer.startsWith('rr-')) {
@@ -407,11 +495,6 @@ function buildLegend(type) {
         el.innerHTML = '<div class="li"><div class="lsq" style="background:#fff"></div><span>Очень холодные вершины (Грозы)</span></div><div class="li"><div class="lsq" style="background:#999"></div><span>Умеренные облака</span></div><div class="li"><div class="lsq" style="background:#333"></div><span>Тепло / Земля</span></div>';
         return;
     }
-    if (type === 'rv-precip') {
-        $('ltitle').textContent = 'ОСАДКИ (RAINVIEWER)';
-        el.innerHTML = '<div class="li"><div class="lsq" style="background:#00ffff"></div><span>Слабые</span></div><div class="li"><div class="lsq" style="background:#00ff00"></div><span>Умеренные</span></div><div class="li"><div class="lsq" style="background:#ff0000"></div><span>Сильные</span></div><div class="li"><div class="lsq" style="background:#ff00ff"></div><span>Экстремальные</span></div>';
-        return;
-    }
     
     $('ltitle').textContent = type === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ';
     items.forEach(function(p){var row=document.createElement('div');row.className='li';var sq=document.createElement('div');sq.className='lsq';
@@ -420,7 +503,7 @@ function buildLegend(type) {
 }
 
 function toggleLegend(){var lg=$('legend'),btn=$('toggle-legend-btn');if(S.legendVis){lg.classList.add('collapsed');btn.innerHTML='+'}else{lg.classList.remove('collapsed');btn.innerHTML='−'}S.legendVis=!S.legendVis}
-var toastTmr;function toast(m){var el=$('dbg');clearTimeout(toastTmr);el.style.color='#7ab4ff';el.textContent=m;toastTmr=setTimeout(function(){el.style.color='';doRender()},2500)}
+var toastTmr;function toast(m){var el=$('dbg');clearTimeout(toastTmr);el.style.color='#7ab4ff';el.textContent=m;toastTmr=setTimeout(function(){el.style.color='';doRender()},3000)}
 
 /* ══════════════════════════════════════════
    CROSSHAIR
@@ -469,6 +552,6 @@ buildFrames();
 updThumb();
 schedRender();
 
-setInterval(function(){if(!S.playing&&!S.manualTime&&!S.layer.startsWith('rv')){var n=nowTs();if(n!==S.ts){S.ts=n;updThumb();forceRefresh();toast('Новые данные')}}buildFrames();},60000);
+setInterval(function(){if(!S.playing&&!S.manualTime&&S.layer!=='rv-sat'){var n=nowTs();if(n!==S.ts){S.ts=n;updThumb();forceRefresh();toast('Новые данные')}}buildFrames();},60000);
 
 })();
