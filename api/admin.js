@@ -5,7 +5,13 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
+// Сложный ключ администратора
+const ADMIN_SECRET = 'xR9_@dminK3y#2024Sec!';
+
 export default async function handler(req, res) {
+  const secret = req.query.secret || req.body?.secret;
+  if (secret !== ADMIN_SECRET) return res.status(403).json({ error: 'Доступ запрещен' });
+
   try {
     if (req.method === 'GET') {
       const passwords = await redis.smembers('passwords');
@@ -19,11 +25,7 @@ export default async function handler(req, res) {
           const ip = await redis.get(k);
           if (ip) ips.push(ip);
         }
-        passStatus.push({ 
-          password: p, 
-          activeDevices: keys.length, 
-          ips: ips.join(', ') 
-        });
+        passStatus.push({ password: p, activeDevices: keys.length, ips: ips.join(', ') });
       }
 
       return res.json({ passwords: passStatus, logs });
@@ -40,10 +42,9 @@ export default async function handler(req, res) {
 
       if (action === 'delete') {
         await redis.srem('passwords', password);
+        await redis.del(`device:${password}`); // Удаляем привязку устройства!
         const keys = await redis.keys(`sess:${password}:*`);
-        if (keys.length > 0) {
-          await redis.del(...keys);
-        }
+        if (keys.length > 0) await redis.del(...keys);
         return res.json({ success: true });
       }
     }
