@@ -4,55 +4,77 @@
     <meta charset="UTF-8">
     <title>Админка</title>
     <style>
-        body { background: #0a0a0a; color: #eee; font-family: sans-serif; padding: 20px; }
+        body { background: #0a0a0a; color: #eee; font-family: sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        h1 { border-bottom: 1px solid #333; padding-bottom: 10px; }
         button { background: #4a7fe8; color: #fff; border: 0; padding: 8px 12px; cursor: pointer; border-radius: 5px; margin: 2px; }
         .del { background: #ff5252; }
         ul { list-style: none; padding: 0; }
-        li { background: #1a1a1a; padding: 10px; margin-bottom: 5px; border-radius: 5px; font-family: monospace; }
-        .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-        .badge-0 { background: #333; color: #888; }
-        .badge-1 { background: #b71c1c; color: #ef9a9a; }
+        li { background: #1a1a1a; padding: 15px; margin-bottom: 10px; border-radius: 8px; font-family: monospace; border-left: 4px solid #333; }
+        li.active-pass { border-left-color: #ff5252; }
+        .pass-name { font-size: 16px; font-weight: bold; color: #fff; display: block; margin-bottom: 8px; }
+        .device-info { font-size: 14px; color: #ccc; }
+        .device-info b { color: #fff; }
+        .status-free { color: #69f0ae; }
+        .status-busy { color: #ff5252; font-weight: bold; }
+        .ip-list { color: #aaa; font-size: 12px; margin-top: 4px; }
         .err { color: #ff5252; font-family: monospace; background: #2a0000; padding: 10px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
+        .summary { background: #111; padding: 10px 15px; border-radius: 5px; margin-bottom: 20px; font-size: 14px; color: #7ab4ff; border: 1px solid #333; }
     </style>
 </head>
 <body>
     <h1>Админ-панель</h1>
-    <button id="gen">Сгенерировать пароль</button>
-    <div id="list"></div>
+    
+    <div class="summary" id="summary">Загрузка статистики...</div>
+    
+    <button id="gen">➕ Сгенерировать новый пароль</button>
+    <div id="list" style="margin-top: 20px;"></div>
 
     <script>
         async function load() {
             try {
                 const res = await fetch('/api/admin');
                 if (!res.ok) {
-                    // Читаем ответ как текст, чтобы увидеть реальную ошибку Vercel
                     const errText = await res.text();
-                    document.getElementById('list').innerHTML = `<div class="err">Ошибка сервера (Статус ${res.status}):<br><br>${errText}</div>`;
+                    document.getElementById('list').innerHTML = `<div class="err">Ошибка загрузки (Статус ${res.status}):<br><br>${errText}</div>`;
+                    document.getElementById('summary').innerHTML = 'Ошибка загрузки статистики';
                     return;
                 }
                 const data = await res.json();
                 
-                let html = '<h2>Активные пароли:</h2><ul>';
+                // Считаем общую статистику
+                let totalPasswords = data.passwords.length;
+                let totalActiveDevices = 0;
+                data.passwords.forEach(p => { totalActiveDevices += p.activeDevices; });
+                document.getElementById('summary').innerHTML = `📊 Всего паролей: <b>${totalPasswords}</b> | 👥 Устройств онлайн: <b>${totalActiveDevices}</b>`;
+
+                let html = '<h2>Список паролей:</h2><ul>';
                 if (data.passwords.length === 0) {
                     html += '<li>Паролей пока нет. Сгенерируйте новый.</li>';
                 }
+                
                 data.passwords.forEach(p => {
-                    const badgeClass = `badge-${p.activeDevices}`;
-                    let statusText = `${p.activeDevices}/1 устр.`;
+                    const isBusy = p.activeDevices > 0;
+                    const statusText = isBusy 
+                        ? `<span class="status-busy">🟥 ИСПОЛЬЗУЕТСЯ</span>` 
+                        : `<span class="status-free">🟩 СВОБОДЕН</span>`;
                     
-                    html += `<li>
-                        <b>${p.password}</b> 
-                        <span class="badge ${badgeClass}">${statusText}</span>
-                        <span style="color:#888; font-size:12px; margin-left:10px;">${p.ips || 'Нет подключений'}</span>
-                        <button class="del" style="float:right;" onclick="del('${p.password}')">Удалить</button>
+                    html += `<li class="${isBusy ? 'active-pass' : ''}">
+                        <span class="pass-name">🔑 Пароль: ${p.password}</span>
+                        <div class="device-info">
+                            Статус: ${statusText}<br>
+                            Устройств онлайн: <b>${p.activeDevices}</b> из <b>1</b>
+                        </div>
+                        <div class="ip-list">IP: ${p.ips || '— нет подключений —'}</div>
+                        <button class="del" style="margin-top:10px;" onclick="del('${p.password}')">🗑 Удалить пароль</button>
                     </li>`;
                 });
                 html += '</ul><h2>Логи (последние 20):</h2><ul>';
                 if (data.logs.length === 0) {
                     html += '<li>Логов нет.</li>';
                 }
-                data.logs.forEach(l => html += `<li>${l}</li>`);
+                data.logs.forEach(l => html += `<li style="padding: 8px; font-size: 12px;">${l}</li>`);
                 html += '</ul>';
+                
                 document.getElementById('list').innerHTML = html;
             } catch (e) {
                 document.getElementById('list').innerHTML = `<div class="err">Сбой сети: ${e.message}</div>`;
@@ -60,23 +82,42 @@
         }
 
         document.getElementById('gen').onclick = async () => {
-            await fetch('/api/admin', { 
-                method: 'POST', 
-                headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify({ action: 'generate' }) 
-            });
-            load();
+            const btn = document.getElementById('gen');
+            btn.textContent = 'Генерация...';
+            btn.disabled = true;
+            
+            try {
+                const res = await fetch('/api/admin', { 
+                    method: 'POST', 
+                    headers: {'Content-Type':'application/json'}, 
+                    body: JSON.stringify({ action: 'generate' }) 
+                });
+                const data = await res.json();
+                
+                if (!res.ok || data.error) {
+                    alert('Ошибка генерации: ' + (data.error || 'Неизвестная ошибка'));
+                }
+            } catch (e) {
+                alert('Сетевая ошибка: ' + e.message);
+            } finally {
+                btn.textContent = '➕ Сгенерировать новый пароль';
+                btn.disabled = false;
+                load();
+            }
         };
 
         async function del(pass) {
-            await fetch('/api/admin', { 
-                method: 'POST', 
-                headers: {'Content-Type':'application/json'}, 
-                body: JSON.stringify({ action: 'delete', password: pass }) 
-            });
-            load();
+            if (confirm('Удалить этот пароль?')) {
+                await fetch('/api/admin', { 
+                    method: 'POST', 
+                    headers: {'Content-Type':'application/json'}, 
+                    body: JSON.stringify({ action: 'delete', password: pass }) 
+                });
+                load();
+            }
         }
 
+        // Загружаем при открытии и обновляем каждые 5 секунд
         load();
         setInterval(load, 5000);
     </script>
