@@ -12,21 +12,10 @@
         button { background:#4a7fe8; color:#fff; border:0; padding:12px; border-radius:8px; cursor:pointer; width:100%; font-weight:700; font-size:14px; }
         button:hover { background:#3a6fd8; }
         .error { color:#ff5252; font-size:12px; margin-top:10px; display:none; }
-        
-        /* Стили для фото кота */
-        .cat-img { 
-            width: 100%; 
-            height: 220px; /* Фиксированная высота для ровного прямоугольника */
-            object-fit: cover; /* Обрезает края, чтобы фото не сплющивалось */
-            border-radius: 8px; 
-            margin-bottom: 20px; 
-            display: block;
-        }
     </style>
 </head>
 <body>
     <div class="box">
-        <img src="https://z-cdn-media.chatglm.cn/files/29d513e1-df40-4a93-b959-105ef623e24c.jpg?auth_key=1886207663-276e1ada5b0248db927b4ab3d1143c65-0-14650d1add318662eb0a13fb551ac34d" alt="А фиг тебе!" class="cat-img">
         <h2>2х2 | РАДАР</h2>
         <form id="loginForm">
             <input type="password" id="pass" placeholder="Введите пароль" required>
@@ -35,16 +24,30 @@
         </form>
     </div>
     <script>
+        // Функция генерации уникального ID для этого браузера
+        function getDeviceId() {
+            let id = localStorage.getItem('radar_device_id');
+            if (!id) {
+                id = 'dev-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+                localStorage.setItem('radar_device_id', id);
+            }
+            return id;
+        }
+
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const pass = document.getElementById('pass').value;
             const errBox = document.getElementById('err');
             errBox.style.display = 'none';
 
+            // Отправляем пароль и ID устройства
             const res = await fetch('/api/auth?action=login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pass })
+                body: JSON.stringify({ 
+                    password: pass,
+                    deviceId: getDeviceId()
+                })
             });
             const data = await res.json();
 
