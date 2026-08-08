@@ -1,10 +1,9 @@
-import Redis from 'ioredis';
+import { Redis } from '@upstash/redis';
 
-// Подключаемся к вашей базе данных
-if (!global._redis) {
-  global._redis = new Redis(process.env.tatmeteostorage_REDIS_URL);
-}
-const redis = global._redis;
+const redis = new Redis({
+  url: process.env.TATMETEOSTORAGE_REDIS_REST_URL || process.env.tatmeteostorage_REDIS_REST_URL,
+  token: process.env.TATMETEOSTORAGE_REDIS_REST_TOKEN || process.env.tatmeteostorage_REDIS_REST_TOKEN,
+});
 
 export default async function handler(req, res) {
   const action = req.query.action;
@@ -23,7 +22,6 @@ export default async function handler(req, res) {
     const body = await getBody();
     const { password } = body;
 
-    // --- ВХОД ---
     if (action === 'login') {
       if (!password) return res.status(400).json({ success: false, error: 'Введите пароль' });
 
@@ -36,8 +34,7 @@ export default async function handler(req, res) {
       }
 
       const sid = Math.random().toString(36).slice(2);
-      // Записываем сессию на 60 секунд (EX 60)
-      await redis.set(`sess:${password}:${sid}`, userIp, 'EX', 60);
+      await redis.set(`sess:${password}:${sid}`, userIp, { ex: 60 });
       
       await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${password} | Вход (Устр: 1/1)`);
 
@@ -48,7 +45,6 @@ export default async function handler(req, res) {
       return res.json({ success: true });
     }
 
-    // --- ПУЛЬС (Heartbeat) ---
     if (action === 'heartbeat') {
       const cookies = req.headers.cookie || '';
       const passMatch = cookies.match(/auth_pass=([^;]+)/);
@@ -59,13 +55,12 @@ export default async function handler(req, res) {
         const sid = sidMatch[1];
         const exists = await redis.exists(`sess:${pass}:${sid}`);
         if (exists === 1) {
-          await redis.set(`sess:${pass}:${sid}`, userIp, 'EX', 60);
+          await redis.set(`sess:${pass}:${sid}`, userIp, { ex: 60 });
         }
       }
       return res.json({ success: true });
     }
 
-    // --- ВЫХОД ---
     if (action === 'logout') {
       const cookies = req.headers.cookie || '';
       const passMatch = cookies.match(/auth_pass=([^;]+)/);
