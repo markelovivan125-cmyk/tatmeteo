@@ -443,4 +443,68 @@
 
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
   console.log('2×2 Радар загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
+    // ─── МОЛНИИ BLITZORTUNG ─────────────────────────────────
+  var lightningLayer = L.layerGroup().addTo(map);
+  var lightningActive = false;
+  var lightningInterval = null;
+
+  function getSquareBounds(lat, lon, sizeKm) {
+    var latDelta = sizeKm / 111.0;
+    var lonDelta = sizeKm / (111.0 * Math.cos(lat * Math.PI / 180));
+    return [[lat - latDelta/2, lon - lonDelta/2], [lat + latDelta/2, lon + lonDelta/2]];
+  }
+
+  async function fetchLightning() {
+    try {
+      const res = await fetch('/api/lightning', { cache: 'no-store' });
+      const strikes = await res.json();
+      lightningLayer.clearLayers();
+      
+      var now = Date.now();
+      var oneHourAgo = now - 3600000; // 1 час в миллисекундах
+
+      strikes.forEach(function(strike) {
+        // Формат Blitzortung: [timestamp, lat, lon, ...]
+        var time = strike[0];
+        var lat = strike[1];
+        var lon = strike[2];
+        
+        if (time >= oneHourAgo) {
+          var bounds = getSquareBounds(lat, lon, 1.5); // Квадрат 1.5х1.5 км
+          L.rectangle(bounds, {
+            color: "#ffeb3b", 
+            weight: 1,
+            fillColor: "#ffeb3b", 
+            fillOpacity: 0.8,
+            interactive: false
+          }).addTo(lightningLayer);
+        }
+      });
+    } catch (e) {
+      console.error('Lightning fetch error:', e);
+    }
+  }
+
+  function toggleLightning() {
+    lightningActive = !lightningActive;
+    var btn = document.querySelector('#btn-lightning');
+    if (btn) {
+      if (lightningActive) {
+        btn.classList.add('on');
+        lightningLayer.addTo(map);
+        fetchLightning();
+        lightningInterval = setInterval(fetchLightning, 60000); // Обновление каждую минуту
+        toast('Молнии включены (Blitzortung)');
+      } else {
+        btn.classList.remove('on');
+        lightningLayer.clearLayers();
+        if (lightningInterval) clearInterval(lightningInterval);
+        toast('Молнии выключены');
+      }
+    }
+  }
+  
+  // Назначаем на кнопку, если она есть
+  var btnLightning = document.querySelector('#btn-lightning');
+  if (btnLightning) btnLightning.addEventListener('click', toggleLightning);
 })();
