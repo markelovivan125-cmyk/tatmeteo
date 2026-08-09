@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
       if (exists === 1) isAuth = true;
     } catch (e) {
-      console.error('Redis error in serve.js:', e);
+      console.error('Redis error:', e);
     }
   }
 
@@ -32,20 +32,24 @@ export default async function handler(req, res) {
   // 2. Определение запрошенного файла
   let reqPath = req.url;
   if (reqPath.includes('?path=')) {
-    reqPath = '/' + reqPath.split('?path=')[1];
+    reqPath = reqPath.split('?path=')[1];
   } else if (reqPath === '/' || reqPath === '/api/serve') {
-    reqPath = '/index.html';
+    reqPath = 'index.html';
   }
   
-  reqPath = reqPath.split('?')[0]; // Убираем остальные параметры
+  reqPath = reqPath.split('?')[0]; // Убираем параметры
   reqPath = decodeURIComponent(reqPath);
+  
+  // Полностью очищаем от любых слешей в начале и конце, чтобы path.join сработал правильно
+  reqPath = reqPath.replace(/^\/+|\/+$/g, '');
   reqPath = reqPath.replace(/\.\.\//g, ''); // Защита от выхода из папки
 
   const filePath = path.join(process.cwd(), 'protected', reqPath);
   
   try {
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      res.status(404).send('404: File Not Found');
+      // Выводим реальный путь в ошибку, чтобы понять, чего не хватает
+      res.status(404).send(`404: File Not Found<br>Искал здесь: ${filePath}`);
       return;
     }
 
@@ -55,7 +59,6 @@ export default async function handler(req, res) {
     else if (ext === '.css') contentType = 'text/css; charset=utf-8';
     else if (ext === '.png') contentType = 'image/png';
     else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
-    else if (ext === '.json') contentType = 'application/json; charset=utf-8';
 
     const fileContent = fs.readFileSync(filePath);
     res.setHeader('Content-Type', contentType);
