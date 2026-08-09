@@ -31,24 +31,30 @@ export default async function handler(req, res) {
 
   // 2. Определение запрошенного файла
   let reqPath = req.url;
+  
+  // Достаем путь из параметра ?path=
   if (reqPath.includes('?path=')) {
     reqPath = reqPath.split('?path=')[1];
   } else if (reqPath === '/' || reqPath === '/api/serve') {
     reqPath = 'index.html';
   }
   
-  reqPath = reqPath.split('?')[0]; // Убираем параметры
+  reqPath = reqPath.split('?')[0]; // Убираем остальные параметры
   reqPath = decodeURIComponent(reqPath);
   
-  // Полностью очищаем от любых слешей в начале и конце, чтобы path.join сработал правильно
+  // Очищаем от слешей в начале и конце
   reqPath = reqPath.replace(/^\/+|\/+$/g, '');
   reqPath = reqPath.replace(/\.\.\//g, ''); // Защита от выхода из папки
+
+  // ЕСЛИ ПУСТЬ ПУСТОЙ - ОТДАЕМ INDEX.HTML
+  if (reqPath === '' || reqPath === '/') {
+    reqPath = 'index.html';
+  }
 
   const filePath = path.join(process.cwd(), 'protected', reqPath);
   
   try {
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      // Выводим реальный путь в ошибку, чтобы понять, чего не хватает
       res.status(404).send(`404: File Not Found<br>Искал здесь: ${filePath}`);
       return;
     }
