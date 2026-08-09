@@ -142,3 +142,19 @@ body::after { content:none; }
 #smooth-control input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid #000; }
 #smooth-control input[type="range"]::-moz-range-thumb { width:12px; height:12px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid #000; }
 #smooth-val { font-size:10px; font-weight:600; color:var(--accent); min-width:16px; text-align:center; }
+/* Линейка и прицел поверх радара */
+#radar { z-index: 350 !important; }
+.leaflet-overlay-pane, .leaflet-marker-pane { z-index: 500 !important; }
+
+/* Окно справки */
+#help-modal { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; }
+#help-modal.open { display: flex; }
+
+/* Светлая тема */
+body.light-theme { background: #f0f0f0 !important; color: #121212 !important; }
+body.light-theme .glass, body.light-theme .panel { background: rgba(255, 255, 255, 0.9) !important; border-color: #ccc !important; color: #121212 !important; box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important; }
+body.light-theme .btn { color: #555 !important; }
+body.light-theme .btn.on { background: #4a7fe8 !important; color: #fff !important; }
+body.light-theme #tfill { background: #4a7fe8 !important; }
+body.light-theme #tthumb { background: #4a7fe8 !important; border-color: #f0f0f0 !important; }
+body.light-theme .leaflet-container { background: #e0e0e0 !important; }
