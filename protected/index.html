@@ -42,7 +42,7 @@
     <button class="btn" id="btn-help">Справка</button>
     <button class="btn" id="btn-theme">Тема</button>
 
-       <div id="opacity-control">
+    <div id="opacity-control">
       <label>🌓</label>
       <input type="range" id="opacity-slider" min="0" max="100" value="100" />
       <span id="opacity-val">100%</span>
@@ -115,8 +115,7 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-    // Скрипт пульса (чтобы сервер не выкинул из аккаунта)
+  <script>
     setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
   </script>
   <script src="script.js"></script>
