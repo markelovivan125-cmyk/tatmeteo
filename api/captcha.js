@@ -18,20 +18,18 @@ export default async function handler(req, res) {
   const text = randomText(5);
   const id = Math.random().toString(36).slice(2);
   
-  // Сохраняем ответ капчи в базу на 5 минут (300 сек)
   await redis.set(`captcha:${id}`, text.toLowerCase(), { ex: 300 });
 
-  // Генерируем SVG картинку с искаженным текстом
   let svg = `<svg width="150" height="50" xmlns="http://www.w3.org/2000/svg">`;
-  svg += `<rect width="100%" height="100%" fill="#1a1a1a" />`;
+  svg += `<rect width="100%" height="100%" fill="#051a0e" />`;
   for (let i = 0; i < 6; i++) {
-    svg += `<line x1="${Math.random()*150}" y1="${Math.random()*50}" x2="${Math.random()*150}" y2="${Math.random()*50}" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>`;
+    svg += `<line x1="${Math.random()*150}" y1="${Math.random()*50}" x2="${Math.random()*150}" y2="${Math.random()*50}" stroke="rgba(0,255,157,0.3)" stroke-width="2"/>`;
   }
   text.split('').forEach((c, i) => {
     const x = 15 + i * 25;
     const y = 30 + Math.random() * 10 - 5;
     const rot = Math.random() * 30 - 15;
-    const color = `hsl(${Math.random()*360}, 70%, 60%)`;
+    const color = `hsl(${Math.random()*120 + 120}, 70%, 60%)`;
     svg += `<text x="${x}" y="${y}" font-family="monospace" font-size="24" font-weight="bold" fill="${color}" transform="rotate(${rot} ${x} ${y})">${c}</text>`;
   });
   svg += `</svg>`;
