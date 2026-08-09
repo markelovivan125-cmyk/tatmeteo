@@ -1,0 +1,1950 @@
+(function() {
+      'use strict';
+
+      var $ = function(id) { return document.getElementById(id); };
+
+      // ─── ЗАСТАВКА С УЛУЧШЕННЫМИ АНИМАЦИЯМИ ─────────────────
+      var splash = $('splash-screen');
+      var enterBtn = $('splash-enter');
+      var loaderFill = $('loader-fill');
+      var loaderLabel = $('loader-label');
+      var bootLines = document.querySelectorAll('#boot-lines .boot-line');
+
+      var progress = 0;
+      var bootIndex = 0;
+      var loadComplete = false;
+
+      // Функция обновления прогресса
+      function updateProgress(value) {
+        progress = Math.min(100, value);
+        loaderFill.style.width = progress + '%';
+        // обновляем текст
+        if (progress < 30) loaderLabel.textContent = 'ЗАГРУЗКА СИСТЕМЫ...';
+        else if (progress < 60) loaderLabel.textContent = 'КАЛИБРОВКА ОБОРУДОВАНИЯ...';
+        else if (progress < 90) loaderLabel.textContent = 'ЗАГРУЗКА НЕЙРОСЕТЕЙ...';
+        else loaderLabel.textContent = 'СИСТЕМА ГОТОВА';
+        if (progress >= 100) {
+          loadComplete = true;
+          enterBtn.classList.add('ready');
+          loaderLabel.textContent = 'ГОТОВ К РАБОТЕ';
+          // Показать все строки как выполненные
+          bootLines.forEach(function(line) {
+            line.classList.add('done');
+            line.querySelector('.status').textContent = '✓';
+          });
+        }
+      }
+
+      // Постепенное заполнение прогресс-бара
+      function startLoading() {
+        var startTime = Date.now();
+        var duration = 4500; // 4.5 секунды
+
+        function tick() {
+          var elapsed = Date.now() - startTime;
+          var pct = Math.min(100, (elapsed / duration) * 100);
+          updateProgress(pct);
+          if (pct < 100) {
+            requestAnimationFrame(tick);
+          } else {
+            updateProgress(100);
+          }
+        }
+        tick();
+      }
+
+      // Показ строк загрузки с задержкой
+      function showBootLines() {
+        bootLines.forEach(function(line, index) {
+          var delay = parseFloat(line.dataset.delay) || (index * 0.8 + 1);
+          setTimeout(function() {
+            line.classList.add('visible');
+            // Через некоторое время меняем статус на "OK"
+            setTimeout(function() {
+              line.classList.add('done');
+              line.querySelector('.status').textContent = '✓';
+            }, 1200);
+          }, delay * 1000);
+        });
+      }
+
+      // Запускаем анимации после небольшой задержки
+      setTimeout(function() {
+        startLoading();
+        showBootLines();
+      }, 600);
+
+      // Обработчик кнопки "ВОЙТИ"
+      function hideSplash() {
+        splash.classList.add('hidden');
+        setTimeout(function() {
+          splash.style.display = 'none';
+        }, 900);
+      }
+
+      enterBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (loadComplete) {
+          hideSplash();
+        } else {
+          // Если ещё не загрузилось, можно показать сообщение
+          toast('Подождите завершения загрузки');
+        }
+      });
+
+      // Также можно закрыть по Enter, но только когда готова
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !splash.classList.contains('hidden')) {
+          if (loadComplete) {
+            hideSplash();
+          }
+        }
+      });
+
+      // Функция toast (для сообщения)
+      function toast(m) {
+        var el = $('dbg');
+        clearTimeout(toastTmr);
+        el.style.color = '#00f0ff';
+        el.textContent = m;
+        toastTmr = setTimeout(function() { el.style.color = '';
+          doRender(); }, 2500);
+      }
+      var toastTmr;
+
+      // ─── управление панелями ────────────────────────────────
+      var hiddenPanels = {};
+      window.closePanel = function(id) {
+        var el = $(id);
+        if (el) { el.style.display = 'none';
+          hiddenPanels[id] = true; }
+        var rb = $('restore-' + id);
+        if (rb) rb.style.display = 'block';
+      };
+      window.restorePanel = function(id) {
+        var el = $(id);
+        if (el) {
+          var flexPanels = { ctrl: 1, tl: 1 };
+          el.style.display = flexPanels[id] ? 'flex' : 'block';
+          hiddenPanels[id] = false;
+        }
+        var rb = $('restore-' + id);
+        if (rb) rb.style.display = 'none';
+      };
+
+      // ─── константы и состояние ──────────────────────────────
+      var SRC = 'https://rainradar.ru/composite',
+        FZ = 5,
+        MDBZ = 5,
+        DELAY = 600,
+        STEP = 600;
+      var HISTORY_MINUTES = 190,
+        MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
+      var BASE_RES_KM = 2;
+
+      var BUILTIN_RADAR = [
+        { v: 80, r: [255, 0, 255], l: '80+ Экстремальное' },
+        { v: 70, r: [160, 0, 255], l: '70 Очень сильное' },
+        { v: 65, r: [100, 0, 255], l: '65 Град/Шквал' },
+        { v: 55, r: [255, 0, 0], l: '55 Гроза 100%' },
+        { v: 50, r: [255, 80, 80], l: '50 Гроза 70%' },
+        { v: 40, r: [255, 170, 0], l: '40 Гроза 30%' },
+        { v: 35, r: [255, 230, 0], l: '35 Сильный ливень' },
+        { v: 30, r: [0, 255, 100], l: '30 Ливень' },
+        { v: 25, r: [0, 255, 200], l: '25 Слабый ливень' },
+        { v: 20, r: [0, 200, 255], l: '20 Умеренные осадки' },
+        { v: 15, r: [0, 150, 255], l: '15 Слабые осадки' },
+        { v: 6, r: [0, 100, 200], l: '6 Облачность' }
+      ];
+
+      var BUILTIN_WX = [
+        { v: 95, r: [255, 255, 255], l: 'Смерч' },
+        { v: 90, r: [255, 0, 80], l: 'Шквал сильный' },
+        { v: 85, r: [255, 50, 120], l: 'Шквал умеренный' },
+        { v: 80, r: [255, 100, 160], l: 'Шквал слабый' },
+        { v: 75, r: [255, 0, 255], l: 'Град сильный' },
+        { v: 70, r: [200, 0, 255], l: 'Град умеренный' },
+        { v: 65, r: [150, 0, 255], l: 'Град слабый' },
+        { v: 55, r: [255, 100, 100], l: 'Гроза >90%' },
+        { v: 50, r: [255, 150, 100], l: 'Гроза 71-90%' },
+        { v: 40, r: [255, 200, 100], l: 'Гроза 30-70%' },
+        { v: 35, r: [0, 150, 255], l: 'Ливень сильный' },
+        { v: 30, r: [0, 200, 255], l: 'Ливень умеренный' },
+        { v: 25, r: [0, 255, 255], l: 'Ливень слабый' },
+        { v: 20, r: [100, 255, 150], l: 'Осадки сильные' },
+        { v: 15, r: [150, 255, 100], l: 'Осадки умеренные' },
+        { v: 6, r: [200, 255, 50], l: 'Осадки слабые' },
+        { v: 0, r: [150, 200, 255], l: 'Облака' }
+      ];
+
+      var S = {
+        ts: 0,
+        px: 1,
+        layer: 'radar',
+        playing: false,
+        timer: null,
+        speedI: 0,
+        speeds: [1, 2, 4],
+        frameI: 0,
+        frames: [],
+        cache: new Map(),
+        pending: new Set(),
+        failed: new Set(),
+        cacheMax: 400,
+        loadN: 0,
+        manualTime: false,
+        legendVis: true,
+        smooth: false,
+        smoothStrength: 1,
+        fade: { active: false, start: 0, duration: 400, alpha: 1 },
+        pxLevels: [0.5, 1, 2, 4],
+        pxIndex: 1,
+        ruler: {
+          active: false,
+          points: [],
+          markers: [],
+          polyline: null,
+          label: null,
+          segmentLabels: []
+        }
+      };
+      S.px = S.pxLevels[S.pxIndex];
+
+      var palettes = {
+        radar: { list: [], activeIdx: 0 },
+        wx: { list: [], activeIdx: 0 }
+      };
+
+      // ─── палитры: загрузка, сохранение, получение ──────────
+      function loadPalettesFromStorage() {
+        try {
+          var r = localStorage.getItem('radarPalettes');
+          var w = localStorage.getItem('wxPalettes');
+          if (r) {
+            var parsedR = JSON.parse(r);
+            if (Array.isArray(parsedR) && parsedR.length > 0) {
+              palettes.radar.list = parsedR;
+              if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0;
+            } else { initDefaultPalettes('radar'); }
+          } else { initDefaultPalettes('radar'); }
+          if (w) {
+            var parsedW = JSON.parse(w);
+            if (Array.isArray(parsedW) && parsedW.length > 0) {
+              palettes.wx.list = parsedW;
+              if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0;
+            } else { initDefaultPalettes('wx'); }
+          } else { initDefaultPalettes('wx'); }
+        } catch (e) { initDefaultPalettes('radar');
+          initDefaultPalettes('wx'); }
+        if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0;
+        if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0;
+      }
+
+      function initDefaultPalettes(layer) {
+        var items = layer === 'radar' ? BUILTIN_RADAR : BUILTIN_WX;
+        var name = layer === 'radar' ? 'Стандартная (радар)' : 'Стандартная (явления)';
+        palettes[layer].list = [{ name: name, items: items, builtin: true }];
+        palettes[layer].activeIdx = 0;
+        savePalettesToStorage(layer);
+      }
+
+      function savePalettesToStorage(layer) {
+        try { localStorage.setItem(layer + 'Palettes', JSON.stringify(palettes[layer].list)); } catch (e) {}
+      }
+
+      function getCurrentPaletteItems() {
+        var layer = S.layer;
+        var list = palettes[layer].list;
+        var idx = palettes[layer].activeIdx;
+        if (!list || list.length === 0 || idx >= list.length) {
+          initDefaultPalettes(layer);
+          idx = 0;
+        }
+        return list[idx].items;
+      }
+
+      // ─── таймлайн ─────────────────────────────────────────────
+      function nowTs() { return Math.floor((Date.now() / 1000 - DELAY) / STEP) * STEP; }
+
+      function minTs() { return nowTs() - MAX_HISTORY_SEC; }
+      S.ts = nowTs();
+
+      function setTime(t, m) {
+        S.ts = Math.max(minTs(), Math.min(t, nowTs()));
+        S.manualTime = !!m;
+      }
+
+      // ─── карта ─────────────────────────────────────────────────
+      var map = L.map('map', {
+        center: [57, 55],
+        zoom: 6,
+        minZoom: 3,
+        maxZoom: 10,
+        zoomControl: false,
+        fadeAnimation: false,
+        markerZoomAnimation: false,
+        scrollWheelZoom: true,
+        doubleClickZoom: true,
+        boxZoom: true,
+        touchZoom: true,
+        keyboard: true
+      });
+
+      // ─── ПОДЛОЖКИ ДЛЯ ТЕМ ─────────────────────────────────────
+      var tileLayers = {
+        cyberpunk: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+        dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+        bright: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+        cold: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
+      };
+
+      var currentTileLayer = null;
+
+      function setTileLayer(theme) {
+        var url = tileLayers[theme] || tileLayers.cyberpunk;
+        if (currentTileLayer) {
+          map.removeLayer(currentTileLayer);
+        }
+        currentTileLayer = L.tileLayer(url, {
+          subdomains: 'abcd',
+          maxZoom: 20,
+          attribution: '© OpenStreetMap, © CARTO'
+        }).addTo(map);
+        // небольшой хак: чтобы при смене подложки карта не перерисовывалась с задержкой
+        setTimeout(function() { map.invalidateSize(); }, 50);
+      }
+
+      // ─── остальная инициализация карты ──────────────────────
+      // Сначала добавляем подложку по умолчанию (киберпанк)
+      setTileLayer('cyberpunk');
+
+      L.control.scale({ position: 'bottomright', metric: true, imperial: false }).addTo(map);
+      setTimeout(function() { map.invalidateSize(); }, 100);
+
+      var canvas = $('radar'),
+        ctx = canvas.getContext('2d');
+
+      function resizeCanvas() {
+        canvas.width = innerWidth;
+        canvas.height = innerHeight;
+        schedRender();
+      }
+      addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+
+      // ─── гео-преобразования ──────────────────────────────────
+      function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * (1 << z)); }
+
+      function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math
+              .PI) / 2 * (1 << z)); }
+
+      function x2lon(x, z) { return x / (1 << z) * 360 - 180; }
+
+      function y2lat(y, z) { var n = Math.PI - 2 * Math.PI * y / (1 << z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) -
+              Math.exp(-n))); }
+
+      function visTiles() {
+        var b = map.getBounds(),
+          mx = (1 << FZ) - 1,
+          x0 = Math.max(0, lon2x(b.getWest(), FZ)),
+          x1 = Math.min(mx, lon2x(b.getEast(), FZ)),
+          y0 = Math.max(0, lat2y(b.getNorth(), FZ)),
+          y1 = Math.min(mx, lat2y(b.getSouth(), FZ)),
+          l = [];
+        for (var x = x0; x <= x1; x++)
+          for (var y = y0; y <= y1; y++) l.push({ x: x, y: y });
+        return l;
+      }
+
+      function tileRect(x, y) {
+        var nw = map.latLngToContainerPoint(L.latLng(y2lat(y, FZ), x2lon(x, FZ)));
+        var se = map.latLngToContainerPoint(L.latLng(y2lat(y + 1, FZ), x2lon(x + 1, FZ)));
+        return { sx: Math.round(nw.x), sy: Math.round(nw.y), sw: Math.round(se.x - nw.x), sh: Math.round(se.y - nw.y) };
+      }
+
+      function makeCK(l, t, p, x, y) { return l + '|' + t + '|' + p + '|' + x + '|' + y; }
+
+      function CK(x, y) { return makeCK(S.layer, S.ts, S.px, x, y); }
+
+      function getColor(raw) {
+        if (raw < MDBZ) return null;
+        var items = getCurrentPaletteItems();
+        for (var i = 0; i < items.length; i++) {
+          if (raw >= items[i].v) return items[i].r;
+        }
+        return null;
+      }
+
+      // ─── сглаживание ──────────────────────────────────────────
+      function applySmoothing(raw, w, h, strength) {
+        if (strength === 0) return raw;
+        var size = strength * 2 + 1;
+        var half = Math.floor(size / 2);
+        var result = new Float32Array(raw.length);
+        var kernel = [];
+        var sigma = strength * 0.6 + 0.5;
+        var sum = 0;
+        for (var i = -half; i <= half; i++) {
+          for (var j = -half; j <= half; j++) {
+            var d = Math.sqrt(i * i + j * j);
+            var val = Math.exp(-(d * d) / (2 * sigma * sigma));
+            kernel.push(val);
+            sum += val;
+          }
+        }
+        for (var ki = 0; ki < kernel.length; ki++) kernel[ki] /= sum;
+        var kw = size,
+          kh = size;
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            var acc = 0,
+              wsum = 0;
+            for (var ky = -half; ky <= half; ky++) {
+              for (var kx = -half; kx <= half; kx++) {
+                var px = x + kx,
+                  py = y + ky;
+                if (px < 0 || px >= w || py < 0 || py >= h) continue;
+                var idx = py * w + px;
+                if (raw[idx] >= 0) {
+                  var kidx = (ky + half) * kw + (kx + half);
+                  acc += raw[idx] * kernel[kidx];
+                  wsum += kernel[kidx];
+                }
+              }
+            }
+            var idx2 = y * w + x;
+            result[idx2] = (wsum > 0) ? acc / wsum : -1;
+          }
+        }
+        return result;
+      }
+
+      // ─── ИНТЕРПОЛЯЦИЯ ДЛЯ 1×1 КМ (px < 1) ──────────────────
+      function bilinearInterpolate(raw, scale) {
+        var w = 256,
+          h = 256;
+        var outW = Math.round(w * scale),
+          outH = Math.round(h * scale);
+        var result = new Float32Array(outW * outH);
+        for (var oy = 0; oy < outH; oy++) {
+          for (var ox = 0; ox < outW; ox++) {
+            var fx = ox / scale,
+              fy = oy / scale;
+            var x1 = Math.floor(fx),
+              y1 = Math.floor(fy);
+            var x2 = Math.min(x1 + 1, w - 1),
+              y2 = Math.min(y1 + 1, h - 1);
+            var dx = fx - x1,
+              dy = fy - y1;
+            var v00 = raw[y1 * w + x1];
+            var v10 = raw[y1 * w + x2];
+            var v01 = raw[y2 * w + x1];
+            var v11 = raw[y2 * w + x2];
+            var valid = (v00 >= 0 && v10 >= 0 && v01 >= 0 && v11 >= 0);
+            if (valid) {
+              var interp = (1 - dx) * (1 - dy) * v00 + dx * (1 - dy) * v10 + (1 - dx) * dy * v01 + dx * dy * v11;
+              result[oy * outW + ox] = interp;
+            } else {
+              var sum = 0,
+                n = 0;
+              if (v00 >= 0) { sum += v00;
+                n++; }
+              if (v10 >= 0) { sum += v10;
+                n++; }
+              if (v01 >= 0) { sum += v01;
+                n++; }
+              if (v11 >= 0) { sum += v11;
+                n++; }
+              result[oy * outW + ox] = n > 0 ? sum / n : -1;
+            }
+          }
+        }
+        return { data: result, width: outW, height: outH };
+      }
+
+      // ─── обработка тайла (с интерполяцией для 1 км) ──────
+      function processTile(img, px, smooth, smoothStrength) {
+        var src = document.createElement('canvas');
+        src.width = src.height = 256;
+        var sc = src.getContext('2d');
+        sc.drawImage(img, 0, 0);
+        var id = sc.getImageData(0, 0, 256, 256),
+          d = id.data;
+
+        var raw = new Float32Array(256 * 256);
+        for (var i = 0; i < d.length; i += 4) {
+          if (d[i + 3] > 0) {
+            var v = (d[i] + d[i + 1] + d[i + 2]) / 3 | 0;
+            raw[i / 4] = v;
+          } else {
+            raw[i / 4] = -1;
+          }
+        }
+
+        var smoothed = raw;
+        if (smooth && smoothStrength > 0) {
+          smoothed = applySmoothing(raw, 256, 256, smoothStrength);
+        }
+
+        var effectivePx = (px < 1) ? 1 : px;
+
+        // --- ЕСЛИ РАЗРЕШЕНИЕ 1×1 КМ (px < 1) – применяем билинейную интерполяцию ---
+        if (px < 1) {
+          var scale = 1 / px;
+          var interp = bilinearInterpolate(smoothed, scale);
+          var outW = interp.width,
+            outH = interp.height;
+          var outCanvas = document.createElement('canvas');
+          outCanvas.width = outW;
+          outCanvas.height = outH;
+          var octx = outCanvas.getContext('2d');
+          octx.imageSmoothingEnabled = false;
+          var dataInterp = interp.data;
+          for (var py = 0; py < outH; py++) {
+            for (var px2 = 0; px2 < outW; px2++) {
+              var idx = py * outW + px2;
+              var val = dataInterp[idx];
+              if (val >= 0) {
+                var rgb = getColor(val);
+                if (rgb) {
+                  octx.fillStyle = 'rgb(' + rgb.join(',') + ')';
+                  octx.fillRect(px2, py, 1, 1);
+                }
+              }
+            }
+          }
+          return {
+            canvas: outCanvas,
+            raw: dataInterp,
+            px: px,
+            scaled: true
+          };
+        }
+
+        // --- Обычный режим (px >= 1) – блоки ---
+        var out = document.createElement('canvas');
+        out.width = out.height = 256;
+        var oc = out.getContext('2d');
+        oc.imageSmoothingEnabled = false;
+
+        var bw = Math.ceil(256 / effectivePx),
+          bh = Math.ceil(256 / effectivePx);
+
+        for (var py2 = 0; py2 < bh; py2++) {
+          for (var px3 = 0; px3 < bw; px3++) {
+            var x0 = px3 * effectivePx,
+              y0 = py2 * effectivePx,
+              x1 = Math.min(x0 + effectivePx, 256),
+              y1 = Math.min(y0 + effectivePx, 256);
+            var sum = 0,
+              n = 0;
+            for (var yy = y0; yy < y1; yy++) {
+              for (var xx = x0; xx < x1; xx++) {
+                var idx2 = yy * 256 + xx;
+                if (smoothed[idx2] >= 0) { sum += smoothed[idx2];
+                  n++; }
+              }
+            }
+            if (n > 0) {
+              var avg = Math.round(sum / n);
+              var rgb2 = getColor(avg);
+              if (rgb2) {
+                oc.fillStyle = 'rgb(' + rgb2.join(',') + ')';
+                oc.fillRect(x0, y0, x1 - x0, y1 - y0);
+              }
+            }
+          }
+        }
+
+        var finalCanvas = out;
+        if (px < 1) {
+          var scale2 = 1 / px;
+          var bigCanvas = document.createElement('canvas');
+          bigCanvas.width = 256 * scale2;
+          bigCanvas.height = 256 * scale2;
+          var bigCtx = bigCanvas.getContext('2d');
+          bigCtx.imageSmoothingEnabled = false;
+          bigCtx.drawImage(out, 0, 0, bigCanvas.width, bigCanvas.height);
+          finalCanvas = bigCanvas;
+        }
+
+        return {
+          canvas: finalCanvas,
+          raw: smoothed,
+          px: px,
+          scaled: false
+        };
+      }
+
+      function bumpLoad(d) { S.loadN = Math.max(0, S.loadN + d);
+        $('pulse').classList.toggle('busy', S.loadN > 0); }
+
+      function fetchTile(x, y) {
+        var ck = CK(x, y);
+        if (S.cache.has(ck) || S.pending.has(ck) || S.failed.has(ck)) return;
+        S.pending.add(ck);
+        bumpLoad(1);
+        var url = SRC + '/' + S.ts + '/' + FZ + '/' + x + '_' + y + '.png';
+        var img = new Image();
+        img.crossOrigin = 'anonymous';
+        var spx = S.px,
+          sl = S.layer,
+          sts = S.ts,
+          ssmooth = S.smooth,
+          sstrength = S.smoothStrength;
+        var tid = setTimeout(function() { S.pending.delete(ck);
+          bumpLoad(-1);
+          S.failed.add(ck); }, 8000);
+        img.onload = function() {
+          clearTimeout(tid);
+          S.pending.delete(ck);
+          bumpLoad(-1);
+          if (S.ts !== sts || S.layer !== sl) return;
+          try {
+            var result = processTile(img, spx, ssmooth, sstrength);
+            if (S.cache.size >= S.cacheMax) S.cache.delete(S.cache.keys().next().value);
+            S.cache.set(ck, result);
+          } catch (e) { S.failed.add(ck); }
+          schedRender();
+        };
+        img.onerror = function() {
+          clearTimeout(tid);
+          S.pending.delete(ck);
+          bumpLoad(-1);
+          S.failed.add(ck);
+        };
+        img.src = url;
+      }
+
+      var renderPend = false;
+
+      function schedRender() {
+        if (!renderPend) { renderPend = true;
+          requestAnimationFrame(doRender); }
+      }
+
+      // ─── ОТРИСОВКА ЛИНЕЙКИ НА CANVAS ─────────────────────────
+      function drawRulerOnCanvas(ctx) {
+        if (!S.ruler.active || S.ruler.points.length < 2) return;
+        var pts = S.ruler.points;
+        var screenPts = pts.map(function(ll) {
+          return map.latLngToContainerPoint(ll);
+        });
+
+        ctx.save();
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.shadowColor = '#00f0ff';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(screenPts[0].x, screenPts[0].y);
+        for (var i = 1; i < screenPts.length; i++) {
+          ctx.lineTo(screenPts[i].x, screenPts[i].y);
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        for (var j = 0; j < screenPts.length; j++) {
+          var p = screenPts[j];
+          ctx.save();
+          ctx.shadowColor = '#00f0ff';
+          ctx.shadowBlur = 15;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = '#00f0ff';
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        var totalDist = 0;
+        for (var k = 1; k < pts.length; k++) {
+          totalDist += pts[k - 1].distanceTo(pts[k]);
+        }
+        var totalKm = (totalDist / 1000).toFixed(1);
+
+        var midIdx = Math.floor((pts.length - 1) / 2);
+        var midPt = pts[midIdx];
+        var midScreen = map.latLngToContainerPoint(midPt);
+        ctx.save();
+        ctx.font = '11px Orbitron, monospace';
+        ctx.fillStyle = '#00f0ff';
+        ctx.shadowColor = '#00f0ff';
+        ctx.shadowBlur = 8;
+        var label = '📏 ' + totalKm + ' км';
+        var tw = ctx.measureText(label).width;
+        var tx = midScreen.x - tw / 2;
+        var ty = midScreen.y - 16;
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 1;
+        var pad = 6;
+        ctx.fillRect(tx - pad, ty - pad - 2, tw + pad * 2, 22);
+        ctx.strokeRect(tx - pad, ty - pad - 2, tw + pad * 2, 22);
+        ctx.fillStyle = '#00f0ff';
+        ctx.shadowBlur = 8;
+        ctx.fillText(label, tx, ty + 8);
+        ctx.restore();
+
+        for (var s = 1; s < pts.length; s++) {
+          var p1 = pts[s - 1],
+            p2 = pts[s];
+          var segDist = (p1.distanceTo(p2) / 1000).toFixed(1);
+          var midSegLat = (p1.lat + p2.lat) / 2;
+          var midSegLng = (p1.lng + p2.lng) / 2;
+          var midSegScreen = map.latLngToContainerPoint(L.latLng(midSegLat, midSegLng));
+          ctx.save();
+          ctx.font = '9px Orbitron, monospace';
+          ctx.fillStyle = '#e0e0ff';
+          ctx.shadowColor = '#00f0ff';
+          ctx.shadowBlur = 6;
+          var segLabel = segDist + ' км';
+          var tw2 = ctx.measureText(segLabel).width;
+          var tx2 = midSegScreen.x - tw2 / 2;
+          var ty2 = midSegScreen.y + 14;
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.strokeStyle = '#00f0ff';
+          ctx.lineWidth = 0.5;
+          ctx.fillRect(tx2 - 4, ty2 - 8, tw2 + 8, 16);
+          ctx.strokeRect(tx2 - 4, ty2 - 8, tw2 + 8, 16);
+          ctx.fillStyle = '#e0e0ff';
+          ctx.shadowBlur = 6;
+          ctx.fillText(segLabel, tx2, ty2 + 3);
+          ctx.restore();
+        }
+      }
+
+      function doRender() {
+        renderPend = false;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (S.fade.active) {
+          var elapsed = (performance.now() - S.fade.start) / S.fade.duration;
+          if (elapsed >= 1) { S.fade.active = false;
+            S.fade.alpha = 1; } else {
+            S.fade.alpha = Math.min(elapsed, 1);
+            S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3);
+            schedRender();
+          }
+        }
+        var alpha = S.fade.active ? S.fade.alpha : 1;
+        var tiles = visTiles();
+        ctx.globalAlpha = alpha;
+        ctx.imageSmoothingEnabled = false;
+
+        for (var i = 0; i < tiles.length; i++) {
+          var t = tiles[i],
+            ck = CK(t.x, t.y),
+            entry = S.cache.get(ck);
+          if (entry && entry.canvas) {
+            var r = tileRect(t.x, t.y);
+            if (r.sw > 0 && r.sh > 0) {
+              if (entry.scaled) {
+                var srcW = entry.canvas.width;
+                var srcH = entry.canvas.height;
+                ctx.drawImage(entry.canvas, 0, 0, srcW, srcH, r.sx, r.sy, r.sw, r.sh);
+              } else {
+                ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh);
+              }
+            }
+          } else { fetchTile(t.x, t.y); }
+        }
+        ctx.globalAlpha = 1;
+
+        if (S.layer === 'wx') {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,255,255,.1)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          for (var gi = 0; gi < tiles.length; gi++) {
+            var gt = tiles[gi],
+              gr = tileRect(gt.x, gt.y);
+            if (gr.sw <= 0 || gr.sh <= 0) continue;
+            var scX = gr.sw / 256,
+              scY = gr.sh / 256,
+              bW = S.px * scX,
+              bH = S.px * scY;
+            if (bW < 1 || bH < 1) continue;
+            var cols = Math.ceil(256 / S.px);
+            for (var ci = 0; ci <= cols; ci++) {
+              var lx = gr.sx + Math.round(ci * bW) + 0.5;
+              ctx.moveTo(lx, gr.sy);
+              ctx.lineTo(lx, gr.sy + gr.sh);
+            }
+            for (var ri = 0; ri <= cols; ri++) {
+              var ly = gr.sy + Math.round(ri * bH) + 0.5;
+              ctx.moveTo(gr.sx, ly);
+              ctx.lineTo(gr.sx + gr.sw, ly);
+            }
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        drawRulerOnCanvas(ctx);
+      }
+
+      map.on('move', schedRender);
+      map.on('moveend zoomend', function() { S.failed.clear();
+        schedRender(); });
+
+      function forceRefresh() { S.cache.clear();
+        S.failed.clear();
+        S.pending.clear();
+        S.loadN = 0;
+        $('pulse').classList.remove('busy');
+        schedRender(); }
+
+      function doRefresh() {
+        setTime(nowTs(), false);
+        buildFrames();
+        updHUD();
+        forceRefresh();
+        toast('Обновлено');
+      }
+
+      function updHUD() { updThumb(); }
+
+      function updThumb() {
+        var f = S.frames;
+        if (!f.length) return;
+        var r = f[f.length - 1] - f[0],
+          p = r === 0 ? 0 : Math.max(0, Math.min(1, (S.ts - f[0]) / r));
+        $('tfill').style.width = p * 100 + '%';
+        $('tthumb').style.left = p * 100 + '%';
+      }
+
+      function buildFrames() {
+        var mx = nowTs(),
+          from = mx - MAX_HISTORY_SEC,
+          frames = [];
+        for (var t = from; t <= mx; t += STEP) frames.push(t);
+        S.frames = frames;
+        var el = $('tlbls');
+        el.innerHTML = '';
+        if (!frames.length) return;
+        for (var i = 0; i < 5; i++) {
+          var idx = Math.round(i / 4 * (frames.length - 1));
+          if (idx >= frames.length) idx = frames.length - 1;
+          var s = document.createElement('span');
+          s.textContent = new Date(frames[idx] * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit',
+            timeZone: 'Europe/Moscow' });
+          el.appendChild(s);
+        }
+        updThumb();
+      }
+
+      var drag = false,
+        timeTooltip = $('time-tooltip');
+
+      function tsFromX(cx) {
+        var r = $('track').getBoundingClientRect();
+        var p = Math.max(0, Math.min(1, (cx - r.left) / r.width));
+        return S.frames[Math.round(p * (S.frames.length - 1))] || nowTs();
+      }
+
+      function pctFromX(cx) {
+        var r = $('track').getBoundingClientRect();
+        return Math.max(0, Math.min(1, (cx - r.left) / r.width)) * 100;
+      }
+
+      function formatTimeDiff(ts) {
+        var now = nowTs(),
+          diff = ts - now,
+          ad = Math.abs(diff);
+        if (ad < 60) return { text: 'сейчас', cls: 'now' };
+        var mins = Math.round(ad / 60),
+          hours = Math.floor(mins / 60),
+          rm = mins % 60,
+          text = '';
+        if (hours > 0) { text = hours + 'ч'; if (rm > 0) text += ' ' + rm + 'м'; } else text = mins + 'м';
+        return diff < 0 ? { text: '−' + text + ' назад', cls: 'past' } : { text: '+' + text + ' вперёд', cls: 'future' };
+      }
+
+      function showTimeTooltip(ts, pct) {
+        var d = new Date(ts * 1000),
+          ts2 = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', second: '2-digit',
+            timeZone: 'Europe/Moscow' }),
+          ds = d.toLocaleDateString('ru', { day: '2-digit', month: 'short', timeZone: 'Europe/Moscow' }),
+          di = formatTimeDiff(ts);
+        timeTooltip.innerHTML = '<div class="tt-time">' + ts2 + '</div><div class="tt-date">' + ds + ' МСК</div><div class="tt-diff ' +
+          di.cls + '">' + di.text + '</div>';
+        timeTooltip.style.left = pct + '%';
+        timeTooltip.classList.add('visible');
+      }
+
+      function hideTimeTooltip() { timeTooltip.classList.remove('visible'); }
+
+      $('track').addEventListener('pointerdown', function(e) {
+        drag = true;
+        var ts = tsFromX(e.clientX),
+          pct = pctFromX(e.clientX);
+        setTime(ts, true);
+        updHUD();
+        showTimeTooltip(ts, pct);
+        this.setPointerCapture(e.pointerId);
+      });
+      $('track').addEventListener('pointermove', function(e) {
+        if (drag) {
+          var ts = tsFromX(e.clientX),
+            pct = pctFromX(e.clientX);
+          setTime(ts, true);
+          updHUD();
+          showTimeTooltip(ts, pct);
+        }
+      });
+      document.addEventListener('pointerup', function() {
+        if (drag) { drag = false;
+          hideTimeTooltip();
+          buildFrames();
+          S.failed.clear();
+          forceRefresh(); }
+      });
+      $('track').addEventListener('mousemove', function(e) {
+        if (!drag) showTimeTooltip(tsFromX(e.clientX), pctFromX(e.clientX));
+      });
+      $('track').addEventListener('mouseleave', function() { if (!drag) hideTimeTooltip(); });
+
+      function animMs() { return 900 / S.speeds[S.speedI]; }
+
+      function togglePlay() { S.playing ? stopPlay() : startPlay(); }
+
+      function startPlay() {
+        buildFrames();
+        S.frameI = 0;
+        S.timer = setInterval(function() {
+          S.frameI = (S.frameI + 1) % S.frames.length;
+          S.ts = S.frames[S.frameI];
+          S.failed.clear();
+          updHUD();
+          schedRender();
+        }, animMs());
+        S.playing = true;
+        $('playbtn').innerHTML = '&#x25A0;';
+      }
+
+      function stopPlay() {
+        clearInterval(S.timer);
+        S.timer = null;
+        S.playing = false;
+        $('playbtn').innerHTML = '&#x25B6;';
+      }
+
+      function cycleSpeed() {
+        S.speedI = (S.speedI + 1) % S.speeds.length;
+        $('spd').textContent = S.speeds[S.speedI] + '×';
+        if (S.playing) { stopPlay();
+          startPlay(); }
+      }
+
+      function shiftTs(d) {
+        stopPlay();
+        var n = Math.round((S.ts + d) / STEP) * STEP;
+        var mn = minTs(),
+          mx = nowTs();
+        n = Math.max(mn, Math.min(n, mx));
+        if (n <= mn) toast('⚠️ Максимум ' + HISTORY_MINUTES + ' мин назад');
+        setTime(n, true);
+        buildFrames();
+        updHUD();
+        S.failed.clear();
+        forceRefresh();
+        toast('⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }));
+      }
+
+      function toggleLayer() {
+        var newLayer = S.layer === 'radar' ? 'wx' : 'radar';
+        S.layer = newLayer;
+        $('btn-layer').textContent = S.layer === 'radar' ? 'Отражаемость' : 'ОЯ Явления';
+        S.pxIndex = 1;
+        S.px = S.pxLevels[S.pxIndex];
+        updatePxLabel();
+        S.cache.clear();
+        S.pending.clear();
+        S.failed.clear();
+        S.fade.active = true;
+        S.fade.start = performance.now();
+        S.fade.alpha = 0;
+        buildLegend();
+        forceRefresh();
+        hidePopup();
+        closeModal();
+        if (S.ruler.active) toggleRuler();
+      }
+
+      function cyclePx() {
+        S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length;
+        S.px = S.pxLevels[S.pxIndex];
+        updatePxLabel();
+        S.cache.clear();
+        S.pending.clear();
+        S.failed.clear();
+        forceRefresh();
+        var resKm = (S.px * BASE_RES_KM).toFixed(1);
+        toast('Разрешение: ' + resKm + ' км/пиксель');
+        schedRender();
+      }
+
+      function updatePxLabel() {
+        var resKm = (S.px * BASE_RES_KM).toFixed(1);
+        $('pxbtn').textContent = resKm + ' км';
+      }
+
+      function toggleSmooth() {
+        S.smooth = !S.smooth;
+        var btn = $('btn-smooth');
+        var ctrl = $('smooth-control');
+        if (S.smooth) {
+          btn.classList.add('on');
+          btn.textContent = 'Сглаживание ✓';
+          ctrl.classList.add('active');
+        } else {
+          btn.classList.remove('on');
+          btn.textContent = 'Сглаживание';
+          ctrl.classList.remove('active');
+        }
+        S.cache.clear();
+        S.pending.clear();
+        S.failed.clear();
+        forceRefresh();
+        toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено');
+      }
+
+      // ─── ЛИНЕЙКА (управление точками) ──────────────────────
+      function toggleRuler() {
+        S.ruler.active = !S.ruler.active;
+        var btn = $('btn-ruler');
+        if (S.ruler.active) {
+          btn.classList.add('on');
+          btn.textContent = '📏 ✓';
+          toast('Клик — точка, двойной клик — завершить.');
+          map.on('click', rulerClick);
+          map.on('dblclick', rulerFinish);
+          if (crosshairMode) toggleCrosshair();
+        } else {
+          btn.classList.remove('on');
+          btn.textContent = '📏';
+          map.off('click', rulerClick);
+          map.off('dblclick', rulerFinish);
+          clearRuler();
+        }
+      }
+
+      function rulerClick(e) {
+        if (!S.ruler.active) return;
+        var latlng = e.latlng;
+        S.ruler.points.push(latlng);
+        var marker = L.circleMarker(latlng, { radius: 5, color: '#00f0ff', fillColor: '#fff', fillOpacity: 1, weight: 2,
+            className: 'ruler-marker' })
+          .addTo(map);
+        S.ruler.markers.push(marker);
+        schedRender();
+      }
+
+      function clearRuler() {
+        S.ruler.points = [];
+        if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline);
+          S.ruler.polyline = null; }
+        if (S.ruler.label) { map.removeLayer(S.ruler.label);
+          S.ruler.label = null; }
+        S.ruler.segmentLabels.forEach(function(l) { map.removeLayer(l); });
+        S.ruler.segmentLabels = [];
+        S.ruler.markers.forEach(function(m) { map.removeLayer(m); });
+        S.ruler.markers = [];
+        schedRender();
+      }
+
+      function rulerFinish(e) {
+        if (!S.ruler.active) return;
+        if (S.ruler.points.length < 2) {
+          toast('Нужно минимум 2 точки');
+        } else {
+          var total = 0;
+          for (var i = 1; i < S.ruler.points.length; i++) {
+            total += S.ruler.points[i - 1].distanceTo(S.ruler.points[i]);
+          }
+          toast('📏 Длина: ' + (total / 1000).toFixed(1) + ' км');
+        }
+        toggleRuler();
+      }
+
+      // ─── ЛЕГЕНДА ──────────────────────────────────────────────
+      function buildLegend() {
+        var el = $('lbody');
+        el.innerHTML = '';
+        var items = getCurrentPaletteItems();
+        var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ';
+        $('ltitle').textContent = title;
+        items.forEach(function(p) {
+          var row = document.createElement('div');
+          row.className = 'li';
+          var sq = document.createElement('div');
+          sq.className = 'lsq';
+          sq.style.background = 'rgb(' + p.r + ')';
+          if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555';
+          var t = document.createElement('span');
+          t.textContent = p.l;
+          row.appendChild(sq);
+          row.appendChild(t);
+          el.appendChild(row);
+        });
+      }
+
+      function toggleLegend() {
+        var lg = $('legend'),
+          btn = $('toggle-legend-btn');
+        if (S.legendVis) { lg.classList.add('collapsed');
+          btn.innerHTML = '+'; } else { lg.classList.remove('collapsed');
+          btn.innerHTML = '−'; }
+        S.legendVis = !S.legendVis;
+      }
+
+      // toast уже определён выше для заставки, но переопределим, чтобы не конфликтовать
+      var toastTmr2;
+
+      function toast(m) {
+        var el = $('dbg');
+        clearTimeout(toastTmr2);
+        el.style.color = '#00f0ff';
+        el.textContent = m;
+        toastTmr2 = setTimeout(function() { el.style.color = '';
+          doRender(); }, 2500);
+      }
+
+      setInterval(function() {
+        if (!S.playing && !S.manualTime) {
+          var n = nowTs();
+          if (n !== S.ts) { S.ts = n;
+            updHUD();
+            forceRefresh();
+            toast('Новые данные'); }
+        }
+        buildFrames();
+      }, 60000);
+
+      // ─── ПРИЦЕЛ И ПИКСЕЛЬНЫЙ ПОПАП (адаптированы для 1×1 км) ──
+      var hoverEl = $('hover-indicator'),
+        popupEl = $('pixel-popup'),
+        crosshairEl = $('crosshair'),
+        crosshairLbl = $('crosshair-label');
+      var popupVisible = false,
+        crosshairMode = false;
+
+      function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+      function findPalEntry(r, g, b) {
+        var items = getCurrentPaletteItems(),
+          best = null,
+          bd = 1e9;
+        for (var i = 0; i < items.length; i++) {
+          var p = items[i],
+            dr = r - p.r[0],
+            dg = g - p.r[1],
+            db = b - p.r[2],
+            d = dr * dr + dg * dg + db * db;
+          if (d < bd) { bd = d;
+            best = p; }
+        }
+        return bd < 3000 ? { label: best.l, v: best.v } : null;
+      }
+
+      // ─── ОБНОВЛЁННАЯ getBlockAt ─────────────────────────────
+      function getBlockAt(mx, my) {
+        var tiles = visTiles();
+        for (var i = 0; i < tiles.length; i++) {
+          var t = tiles[i],
+            r = tileRect(t.x, t.y);
+          if (r.sw <= 0 || r.sh <= 0 || mx < r.sx || mx >= r.sx + r.sw || my < r.sy || my >= r.sy + r.sh) continue;
+          var ck = CK(t.x, t.y),
+            entry = S.cache.get(ck);
+          if (!entry || !entry.canvas) return null;
+
+          var canvasW = entry.canvas.width;
+          var canvasH = entry.canvas.height;
+          var pxInCanvas = Math.round((mx - r.sx) / r.sw * canvasW);
+          var pyInCanvas = Math.round((my - r.sy) / r.sh * canvasH);
+          pxInCanvas = Math.max(0, Math.min(canvasW - 1, pxInCanvas));
+          pyInCanvas = Math.max(0, Math.min(canvasH - 1, pyInCanvas));
+
+          try {
+            var pd = entry.canvas.getContext('2d').getImageData(pxInCanvas, pyInCanvas, 1, 1).data;
+            if (!pd[3]) return null;
+            var scX = r.sw / canvasW;
+            var scY = r.sh / canvasH;
+            var blockSw = Math.max(2, scX);
+            var blockSh = Math.max(2, scY);
+            var dbz = -1;
+            if (entry.raw && entry.raw.length > 0) {
+              var rawIdx = pyInCanvas * canvasW + pxInCanvas;
+              if (rawIdx < entry.raw.length) {
+                dbz = entry.raw[rawIdx];
+              }
+            }
+            return {
+              sx: r.sx + pxInCanvas * scX,
+              sy: r.sy + pyInCanvas * scY,
+              sw: blockSw,
+              sh: blockSh,
+              color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')',
+              r: pd[0],
+              g: pd[1],
+              b: pd[2],
+              info: findPalEntry(pd[0], pd[1], pd[2]),
+              dbz: dbz
+            };
+          } catch (e) { return null; }
+        }
+        return null;
+      }
+
+      function updateCrosshair() {
+        if (!crosshairMode) return;
+        var cx = innerWidth / 2,
+          cy = innerHeight / 2,
+          block = getBlockAt(cx, cy);
+        if (block) {
+          hoverEl.style.display = 'block';
+          hoverEl.style.left = block.sx + 'px';
+          hoverEl.style.top = block.sy + 'px';
+          hoverEl.style.width = block.sw + 'px';
+          hoverEl.style.height = block.sh + 'px';
+          hoverEl.style.background = 'transparent';
+          var info = block.info;
+          var txt = '—';
+          if (info) {
+            if (S.layer === 'radar') {
+              if (block.dbz >= 0) {
+                txt = Math.round(block.dbz) + ' dBZ | ' + info.label;
+              } else {
+                txt = '≥' + info.v + ' dBZ | ' + info.label;
+              }
+            } else {
+              txt = info.label;
+            }
+          }
+          crosshairLbl.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' +
+            block.color + ';border:1px solid #000;vertical-align:middle;margin-right:6px"></span>' + txt;
+          crosshairLbl.style.display = 'block';
+          var lw = crosshairLbl.offsetWidth || 200,
+            lh = crosshairLbl.offsetHeight || 36,
+            lx = cx - lw / 2,
+            ly = cy - 50 - lh;
+          if (ly < 8) ly = cy + 50;
+          crosshairLbl.style.left = lx + 'px';
+          crosshairLbl.style.top = ly + 'px';
+        } else {
+          hoverEl.style.display = 'none';
+          crosshairLbl.innerHTML = '<span style="color:#888">нет данных</span>';
+          crosshairLbl.style.display = 'block';
+          crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px';
+          crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px';
+        }
+      }
+
+      function toggleCrosshair() {
+        crosshairMode = !crosshairMode;
+        var btn = $('btn-crosshair');
+        if (crosshairMode) { btn.classList.add('on');
+          crosshairEl.style.display = 'block';
+          updateCrosshair(); } else { btn.classList.remove('on');
+          crosshairEl.style.display = 'none';
+          crosshairLbl.style.display = 'none';
+          hoverEl.style.display = 'none'; }
+        if (S.ruler.active) toggleRuler();
+      }
+
+      function showPopup(block, mx, my) {
+        var info = block.info;
+        var lbl = info ? escHtml(info.label) : '—';
+        var meta = '';
+        if (info) {
+          if (S.layer === 'radar') {
+            if (block.dbz >= 0) {
+              meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info
+                .label;
+            } else {
+              meta = 'Слой: <b>Отражаемость</b><br>Порог: ≥' + info.v + ' dBZ<br>Категория: ' + info.label;
+            }
+          } else {
+            meta = 'Слой: <b>Явления</b><br>' + info.label;
+          }
+        } else {
+          meta = 'Нет данных';
+        }
+        popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color +
+          '"></div><div class="popup-label">' + lbl +
+          '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+        popupEl.style.display = 'block';
+        popupEl.classList.remove('popup-in');
+        void popupEl.offsetWidth;
+        popupEl.classList.add('popup-in');
+        var px2 = mx + 16,
+          py2 = my - 55;
+        if (px2 + 230 > innerWidth - 8) px2 = mx - 246;
+        if (py2 < 8) py2 = 8;
+        if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118;
+        popupEl.style.left = px2 + 'px';
+        popupEl.style.top = py2 + 'px';
+        popupVisible = true;
+      }
+
+      function hidePopup() { popupEl.style.display = 'none';
+        popupVisible = false; }
+
+      map.on('mousemove', function(e) {
+        if (crosshairMode) return;
+        var p = e.containerPoint,
+          block = getBlockAt(p.x, p.y);
+        if (block) { hoverEl.style.display = 'block';
+          hoverEl.style.left = block.sx + 'px';
+          hoverEl.style.top = block.sy + 'px';
+          hoverEl.style.width = block.sw + 'px';
+          hoverEl.style.height = block.sh + 'px';
+          hoverEl.style.background = block.color; } else hoverEl.style.display = 'none';
+      });
+      map.on('click', function(e) {
+        if (S.ruler.active) return;
+        var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint,
+          block = getBlockAt(p.x, p.y);
+        block ? showPopup(block, p.x, p.y) : hidePopup();
+      });
+
+      // ─── МОДАЛЬНОЕ ОКНО ПАЛИТР ──────────────────────────────
+      var modal = $('palette-modal'),
+        modalClose = $('modal-close'),
+        modalTabs = document.querySelectorAll('.modal-tabs button'),
+        paletteListContainer = $('palette-list-container'),
+        loadPaletteBtn = $('load-palette-btn'),
+        fileInput = $('file-input'),
+        createPaletteBtn = $('create-palette-btn'),
+        deletePaletteBtn = $('delete-palette-btn'),
+        exportPaletteBtn = $('export-palette-btn'),
+        createForm = $('create-form'),
+        newPalName = $('new-pal-name'),
+        entryVal = $('entry-val'),
+        entryColor = $('entry-color'),
+        entryLabel = $('entry-label'),
+        addEntryBtn = $('add-entry-btn'),
+        entriesList = $('entries-list'),
+        savePaletteBtn = $('save-palette-btn'),
+        cancelCreateBtn = $('cancel-create-btn');
+
+      var currentLayerForModal = 'radar';
+      var tempEntries = [];
+      var editingIndex = -1;
+      var editingEntryIndex = -1;
+
+      function openModal() {
+        modal.classList.add('open');
+        currentLayerForModal = S.layer;
+        modalTabs.forEach(function(btn) {
+          btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal);
+        });
+        renderPaletteList();
+        closeForm();
+        editingIndex = -1;
+        editingEntryIndex = -1;
+        tempEntries = [];
+        renderEntries();
+      }
+
+      function closeModal() {
+        modal.classList.remove('open');
+        closeForm();
+      }
+
+      function renderPaletteList() {
+        var list = palettes[currentLayerForModal].list;
+        var activeIdx = palettes[currentLayerForModal].activeIdx;
+        var html = '';
+        list.forEach(function(p, idx) {
+          var activeClass = idx === activeIdx ? 'active' : '';
+          var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : '';
+          var editBtn = p.builtin ? '' :
+            '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>';
+          html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' +
+            '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' +
+            '<div>' + editBtn +
+            (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') +
+            '</div></div>';
+        });
+        paletteListContainer.innerHTML = html;
+
+        paletteListContainer.querySelectorAll('.palette-item').forEach(function(el) {
+          el.addEventListener('click', function(e) {
+            if (e.target.classList.contains('del') || e.target.classList.contains('edit-btn')) return;
+            var idx = parseInt(this.dataset.idx);
+            palettes[currentLayerForModal].activeIdx = idx;
+            savePalettesToStorage(currentLayerForModal);
+            renderPaletteList();
+            if (currentLayerForModal === S.layer) {
+              buildLegend();
+              forceRefresh();
+            }
+          });
+        });
+
+        paletteListContainer.querySelectorAll('.edit-btn').forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var idx = parseInt(this.dataset.idx);
+            startEditingPalette(idx);
+          });
+        });
+
+        paletteListContainer.querySelectorAll('.del').forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var idx = parseInt(this.dataset.idx);
+            var list2 = palettes[currentLayerForModal].list;
+            if (list2[idx].builtin) return;
+            if (confirm('Удалить палитру "' + list2[idx].name + '"?')) {
+              list2.splice(idx, 1);
+              if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx =
+                list2.length - 1;
+              if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0;
+              savePalettesToStorage(currentLayerForModal);
+              renderPaletteList();
+              if (currentLayerForModal === S.layer) {
+                buildLegend();
+                forceRefresh();
+              }
+            }
+          });
+        });
+      }
+
+      function startEditingPalette(idx) {
+        var list = palettes[currentLayerForModal].list;
+        if (idx < 0 || idx >= list.length) return;
+        var pal = list[idx];
+        if (pal.builtin) { toast('Встроенную палитру нельзя редактировать'); return; }
+
+        editingIndex = idx;
+        newPalName.value = pal.name;
+        tempEntries = pal.items.map(function(item) {
+          return {
+            val: item.v,
+            color: '#' + item.r.map(function(c) { return c.toString(16).padStart(2, '0'); }).join(''),
+            label: item.l,
+            r: { r: item.r[0], g: item.r[1], b: item.r[2] }
+          };
+        });
+        editingEntryIndex = -1;
+        renderEntries();
+        createForm.classList.add('open');
+        savePaletteBtn.textContent = '💾 Обновить';
+        toast('Редактирование палитры "' + pal.name + '"');
+      }
+
+      function closeForm() {
+        createForm.classList.remove('open');
+        editingIndex = -1;
+        editingEntryIndex = -1;
+        tempEntries = [];
+        renderEntries();
+        savePaletteBtn.textContent = '💾 Сохранить';
+        newPalName.value = 'Новая палитра';
+        entryVal.value = '0';
+        entryColor.value = '#00aaff';
+        entryLabel.value = 'Осадки';
+      }
+
+      function renderEntries() {
+        entriesList.innerHTML = '';
+        tempEntries.forEach(function(e, idx) {
+          var div = document.createElement('div');
+          div.className = 'entry';
+          if (editingEntryIndex === idx) {
+            div.innerHTML = `
+              <input type="number" class="edit-val" value="${e.val}" step="1" style="width:50px;background:#1a1a2e;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;">
+              <input type="color" class="edit-color" value="${e.color}" style="width:28px;height:28px;padding:0;border:0;background:transparent;cursor:pointer;">
+              <input type="text" class="edit-label" value="${escHtml(e.label)}" style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;">
+              <button class="save-entry-btn" data-idx="${idx}" style="background:var(--neon-cyan);border:none;color:#000;border-radius:4px;padding:2px 8px;cursor:pointer;font-weight:600;">✓</button>
+            `;
+          } else {
+            div.innerHTML = `
+              <span><span class="color-swatch" style="background:${e.color}"></span> ${e.val} → ${escHtml(e.label)}</span>
+              <div>
+                <button class="edit-entry-btn" data-idx="${idx}" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;margin-right:4px;">✎</button>
+                <button class="del-entry" data-idx="${idx}" style="background:none;border:none;color:#ff6b6b;cursor:pointer;font-size:12px;">✕</button>
+              </div>
+            `;
+          }
+          entriesList.appendChild(div);
+        });
+
+        entriesList.querySelectorAll('.save-entry-btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var idx = parseInt(this.dataset.idx);
+            var entryDiv = this.closest('.entry');
+            var valInput = entryDiv.querySelector('.edit-val');
+            var colorInput = entryDiv.querySelector('.edit-color');
+            var labelInput = entryDiv.querySelector('.edit-label');
+            var newVal = parseFloat(valInput.value);
+            if (isNaN(newVal)) { toast('Введите число'); return; }
+            var newColor = colorInput.value;
+            var newLabel = labelInput.value.trim() || 'без метки';
+            var rgb = hexToRgb(newColor);
+            if (!rgb) { toast('Неверный цвет'); return; }
+            tempEntries[idx] = {
+              val: newVal,
+              color: newColor,
+              label: newLabel,
+              r: rgb
+            };
+            editingEntryIndex = -1;
+            renderEntries();
+          });
+        });
+
+        entriesList.querySelectorAll('.edit-entry-btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var idx = parseInt(this.dataset.idx);
+            editingEntryIndex = idx;
+            renderEntries();
+          });
+        });
+
+        entriesList.querySelectorAll('.del-entry').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var idx = parseInt(this.dataset.idx);
+            tempEntries.splice(idx, 1);
+            if (editingEntryIndex === idx) editingEntryIndex = -1;
+            else if (editingEntryIndex > idx) editingEntryIndex--;
+            renderEntries();
+          });
+        });
+      }
+
+      function addEntry() {
+        var v = parseFloat(entryVal.value);
+        if (isNaN(v)) { toast('Введите число'); return; }
+        var color = entryColor.value;
+        var label = entryLabel.value.trim() || 'без метки';
+        var rgb = hexToRgb(color);
+        if (!rgb) { toast('Неверный цвет'); return; }
+        tempEntries.push({ val: v, color: color, label: label, r: rgb });
+        renderEntries();
+        entryVal.value = '';
+        entryLabel.value = '';
+        var maxVal = tempEntries.reduce(function(mx, e) { return Math.max(mx, e.val); }, 0);
+        entryVal.value = (maxVal + 5);
+      }
+
+      function hexToRgb(hex) {
+        var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null;
+      }
+
+      function savePalette() {
+        var name = newPalName.value.trim() || 'Без названия';
+        if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; }
+        var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; });
+        var items = sorted.map(function(e) {
+          return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label };
+        });
+
+        if (editingIndex >= 0) {
+          var list = palettes[currentLayerForModal].list;
+          if (editingIndex >= list.length) { toast('Ошибка: палитра не найдена'); return; }
+          if (list[editingIndex].builtin) { toast('Нельзя редактировать встроенную палитру'); return; }
+          list[editingIndex].name = name;
+          list[editingIndex].items = items;
+          savePalettesToStorage(currentLayerForModal);
+          renderPaletteList();
+          if (currentLayerForModal === S.layer && palettes[currentLayerForModal].activeIdx === editingIndex) {
+            buildLegend();
+            forceRefresh();
+          }
+          toast('Палитра "' + name + '" обновлена');
+          closeForm();
+        } else {
+          var newPal = { name: name, items: items, builtin: false };
+          palettes[currentLayerForModal].list.push(newPal);
+          palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1;
+          savePalettesToStorage(currentLayerForModal);
+          renderPaletteList();
+          if (currentLayerForModal === S.layer) {
+            buildLegend();
+            forceRefresh();
+          }
+          toast('Палитра "' + name + '" сохранена');
+          closeForm();
+        }
+      }
+
+      // ─── ЭКСПОРТ ПАЛИТРЫ ──────────────────────────────────────
+      function exportPalette() {
+        var layer = currentLayerForModal || S.layer;
+        var list = palettes[layer].list;
+        var idx = palettes[layer].activeIdx;
+        if (!list || list.length === 0 || idx >= list.length) {
+          toast('Нет палитры для экспорта');
+          return;
+        }
+        var pal = list[idx];
+        var content = generatePalFile(pal.items, pal.name, layer);
+        var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = (pal.name || 'palette') + '.pal';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast('Палитра "' + pal.name + '" экспортирована');
+      }
+
+      function generatePalFile(items, name, layer) {
+        var sorted = items.slice().sort(function(a, b) { return a.v - b.v; });
+        var lines = [];
+        lines.push('Product: ' + (layer === 'radar' ? 'BR' : 'WX'));
+        lines.push('Units: dBZ');
+        lines.push('Scale: 1');
+        lines.push('Offset: 0');
+        lines.push('Step: 5');
+        lines.push('RF: 0 0 0');
+        lines.push('');
+        for (var i = 0; i < sorted.length; i++) {
+          var p = sorted[i];
+          var r = p.r[0],
+            g = p.r[1],
+            b = p.r[2];
+          lines.push('Color: ' + p.v + ' ' + r + ' ' + g + ' ' + b);
+        }
+        return lines.join('\n');
+      }
+
+      // ─── ЗАГРУЗКА ИЗ ФАЙЛА ──────────────────────────────────
+      function loadPaletteFromFile(file) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            var content = e.target.result;
+            var data = parsePaletteFile(content);
+            if (data) {
+              var name = file.name.replace(/\.[^.]+$/, '') || 'Загруженная';
+              var newPal = { name: name, items: data, builtin: false };
+              palettes[currentLayerForModal].list.push(newPal);
+              palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1;
+              savePalettesToStorage(currentLayerForModal);
+              renderPaletteList();
+              if (currentLayerForModal === S.layer) {
+                buildLegend();
+                forceRefresh();
+              }
+              toast('Палитра загружена');
+            } else {
+              toast('Ошибка парсинга файла');
+            }
+          } catch (err) { toast('Ошибка: ' + err.message); }
+        };
+        reader.readAsText(file);
+      }
+
+      function parsePaletteFile(text) {
+        try {
+          var parsed = JSON.parse(text);
+          if (Array.isArray(parsed) && parsed.length && parsed[0].v !== undefined && parsed[0].r && parsed[0].l) {
+            return parsed;
+          }
+        } catch (e) {}
+
+        var lines = text.split(/\r?\n/).filter(function(line) { return line.trim().length > 0; });
+        var items = [];
+        var inTable = false;
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i].trim();
+          if (/^ColorTable\s*\{/.test(line)) { inTable = true; continue; }
+          if (/^\}/.test(line)) { inTable = false; continue; }
+          if (!inTable) continue;
+          var match = line.match(/Color\s*\[\s*([\d.]+)\s*\]\s*=\s*(rgb|gradient)\s*\(\s*([^)]+)\s*\)/i);
+          if (match) {
+            var v = parseFloat(match[1]);
+            var type = match[2].toLowerCase();
+            var params = match[3].split(/\s*,\s*/).filter(function(s) { return s.length > 0; });
+            if (type === 'rgb' && params.length >= 3) {
+              var r = parseInt(params[0]);
+              var g = parseInt(params[1]);
+              var b = parseInt(params[2]);
+              if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+                items.push({ v: v, r: [r, g, b], l: '>= ' + v + ' dBZ' });
+              }
+            } else if (type === 'gradient' && params.length >= 6) {
+              var r2 = parseInt(params[1]),
+                g2 = parseInt(params[2]),
+                b2 = parseInt(params[3]);
+              if (!isNaN(r2) && !isNaN(g2) && !isNaN(b2)) {
+                items.push({ v: v, r: [r2, g2, b2], l: '>= ' + v + ' dBZ' });
+              }
+            }
+          }
+        }
+        if (items.length > 0) {
+          items.sort(function(a, b) { return b.v - a.v; });
+          return items;
+        }
+
+        var colorLines = [];
+        var product = null;
+        for (var j = 0; j < lines.length; j++) {
+          var line2 = lines[j].trim();
+          if (/^Product:/i.test(line2)) {
+            product = line2;
+          }
+          if (/^Color:/i.test(line2)) {
+            colorLines.push(line2);
+          }
+        }
+        if (colorLines.length > 0) {
+          var newItems = [];
+          for (var k = 0; k < colorLines.length; k++) {
+            var parts = colorLines[k].split(/\s+/);
+            if (parts.length >= 5) {
+              var val = parseFloat(parts[1]);
+              var r3 = parseInt(parts[2]);
+              var g3 = parseInt(parts[3]);
+              var b3 = parseInt(parts[4]);
+              if (!isNaN(val) && !isNaN(r3) && !isNaN(g3) && !isNaN(b3)) {
+                newItems.push({ v: val, r: [r3, g3, b3], l: val + ' dBZ' });
+              }
+            }
+          }
+          if (newItems.length > 0) {
+            newItems.sort(function(a, b) { return b.v - a.v; });
+            return newItems;
+          }
+        }
+
+        var csvItems = [];
+        for (var m = 0; m < lines.length; m++) {
+          var line3 = lines[m].trim();
+          var parts2 = line3.split(/\s*,\s*/);
+          if (parts2.length >= 5) {
+            var v2 = parseFloat(parts2[0]);
+            if (isNaN(v2)) continue;
+            var r4 = parseInt(parts2[1]),
+              g4 = parseInt(parts2[2]),
+              b4 = parseInt(parts2[3]);
+            if (isNaN(r4) || isNaN(g4) || isNaN(b4)) continue;
+            var label = parts2.slice(4).join(',').trim() || 'без метки';
+            csvItems.push({ v: v2, r: [r4, g4, b4], l: label });
+          } else {
+            var m2 = line3.match(/^([\d.]+)\s+#([a-fA-F0-9]{6})\s+(.+)$/);
+            if (m2) {
+              var v3 = parseFloat(m2[1]);
+              if (isNaN(v3)) continue;
+              var rgb = hexToRgb('#' + m2[2]);
+              if (!rgb) continue;
+              csvItems.push({ v: v3, r: [rgb.r, rgb.g, rgb.b], l: m2[3].trim() });
+            }
+          }
+        }
+        if (csvItems.length === 0) return null;
+        csvItems.sort(function(a, b) { return b.v - a.v; });
+        return csvItems;
+      }
+
+      // ─── ОБРАБОТЧИКИ МОДАЛЬНОГО ОКНА ─────────────────────────
+      modalClose.addEventListener('click', closeModal);
+
+      modalTabs.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          currentLayerForModal = this.dataset.layer;
+          modalTabs.forEach(function(b) { b.classList.toggle('active', b === btn); });
+          renderPaletteList();
+          closeForm();
+        });
+      });
+
+      loadPaletteBtn.addEventListener('click', function() { fileInput.click(); });
+      fileInput.addEventListener('change', function(e) {
+        if (this.files && this.files[0]) {
+          loadPaletteFromFile(this.files[0]);
+        }
+        this.value = '';
+      });
+
+      exportPaletteBtn.addEventListener('click', exportPalette);
+
+      createPaletteBtn.addEventListener('click', function() {
+        closeForm();
+        editingIndex = -1;
+        editingEntryIndex = -1;
+        newPalName.value = 'Новая палитра';
+        tempEntries = [];
+        renderEntries();
+        createForm.classList.add('open');
+        savePaletteBtn.textContent = '💾 Сохранить';
+      });
+
+      cancelCreateBtn.addEventListener('click', function() {
+        closeForm();
+      });
+
+      addEntryBtn.addEventListener('click', addEntry);
+      document.querySelectorAll('#entry-val, #entry-label').forEach(function(inp) {
+        inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') addEntry(); });
+      });
+
+      savePaletteBtn.addEventListener('click', savePalette);
+
+      deletePaletteBtn.addEventListener('click', function() {
+        var list = palettes[currentLayerForModal].list;
+        var idx = palettes[currentLayerForModal].activeIdx;
+        if (idx >= list.length) return;
+        if (list[idx].builtin) { toast('Нельзя удалить встроенную палитру'); return; }
+        if (confirm('Удалить активную палитру "' + list[idx].name + '"?')) {
+          list.splice(idx, 1);
+          if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list
+            .length - 1;
+          if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0;
+          savePalettesToStorage(currentLayerForModal);
+          renderPaletteList();
+          if (currentLayerForModal === S.layer) {
+            buildLegend();
+            forceRefresh();
+          }
+        }
+      });
+
+      $('btn-palettes').addEventListener('click', openModal);
+
+      // ─── СПРАВКА ──────────────────────────────────────────────
+      var helpModal = $('help-modal');
+      var helpBtn = $('btn-help');
+      var helpClose = $('help-close');
+
+      function openHelp() {
+        helpModal.classList.add('open');
+      }
+
+      function closeHelp() {
+        helpModal.classList.remove('open');
+      }
+
+      helpBtn.addEventListener('click', openHelp);
+      helpClose.addEventListener('click', closeHelp);
+      helpModal.addEventListener('click', function(e) {
+        if (e.target === this) closeHelp();
+      });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && helpModal.classList.contains('open')) closeHelp();
+      });
+
+      // ─── УПРАВЛЕНИЕ ПРОЗРАЧНОСТЬЮ ────────────────────────────
+      var opacitySlider = $('opacity-slider');
+      var opacityVal = $('opacity-val');
+
+      // Загрузка сохранённого значения
+      var savedOpacity = localStorage.getItem('radarOpacity');
+      if (savedOpacity !== null) {
+        var val = parseInt(savedOpacity);
+        opacitySlider.value = val;
+        opacityVal.textContent = val + '%';
+        canvas.style.opacity = val / 100;
+      } else {
+        canvas.style.opacity = 1;
+      }
+
+      opacitySlider.addEventListener('input', function() {
+        var val = parseInt(this.value);
+        opacityVal.textContent = val + '%';
+        canvas.style.opacity = val / 100;
+        localStorage.setItem('radarOpacity', val);
+      });
+
+      // ─── ПЕРЕКЛЮЧЕНИЕ ТЕМ ─────────────────────────────────────
+      var themeBtn = $('btn-theme');
+      var themes = ['cyberpunk', 'dark', 'bright', 'cold'];
+      var themeNames = {
+        'cyberpunk': 'Киберпанк',
+        'dark': 'Тёмный',
+        'bright': 'Яркий',
+        'cold': 'Холодный'
+      };
+      var currentTheme = localStorage.getItem('radarTheme') || 'cyberpunk';
+
+      function applyTheme(theme) {
+        document.body.className = 'theme-' + theme;
+        themeBtn.textContent = 'Тема: ' + themeNames[theme];
+        localStorage.setItem('radarTheme', theme);
+        // меняем подложку карты
+        setTileLayer(theme);
+      }
+
+      themeBtn.addEventListener('click', function() {
+        var idx = themes.indexOf(currentTheme);
+        idx = (idx + 1) % themes.length;
+        currentTheme = themes[idx];
+        applyTheme(currentTheme);
+        toast('Тема: ' + themeNames[currentTheme] + ' (карта обновлена)');
+      });
+
+      // Применяем сохранённую тему при загрузке
+      applyTheme(currentTheme);
+
+      // ─── ИНИЦИАЛИЗАЦИЯ ─────────────────────────────────────────
+      loadPalettesFromStorage();
+      buildLegend();
+      buildFrames();
+      updHUD();
+      updatePxLabel();
+      schedRender();
+
+      // ─── ПРИВЯЗКА СОБЫТИЙ ─────────────────────────────────────
+      $('playbtn').addEventListener('click', togglePlay);
+      $('spd').addEventListener('click', cycleSpeed);
+      $('pxbtn').addEventListener('click', cyclePx);
+      $('btn-smooth').addEventListener('click', toggleSmooth);
+      $('btn-layer').addEventListener('click', toggleLayer);
+      $('btn-refresh').addEventListener('click', doRefresh);
+      $('btn-crosshair').addEventListener('click', toggleCrosshair);
+      $('btn-ruler').addEventListener('click', toggleRuler);
+      $('b-minus1h').addEventListener('click', function() { shiftTs(-3600); });
+      $('b-minus10m').addEventListener('click', function() { shiftTs(-600); });
+      $('b-plus10m').addEventListener('click', function() { shiftTs(600); });
+      $('toggle-legend-btn').addEventListener('click', function(e) { e.stopPropagation();
+        toggleLegend(); });
+      $('legend-header').addEventListener('click', toggleLegend);
+
+      var smoothSlider = $('smooth-strength');
+      var smoothVal = $('smooth-val');
+      smoothSlider.addEventListener('input', function() {
+        S.smoothStrength = parseInt(this.value);
+        smoothVal.textContent = S.smoothStrength;
+        if (S.smooth) {
+          S.cache.clear();
+          S.pending.clear();
+          S.failed.clear();
+          forceRefresh();
+          toast('Сила сглаживания: ' + S.smoothStrength);
+        }
+      });
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          if (crosshairMode) { toggleCrosshair(); return; }
+          if (S.ruler.active) { toggleRuler(); return; }
+          if (modal.classList.contains('open')) { closeModal(); return; }
+          if (helpModal.classList.contains('open')) { closeHelp(); return; }
+        }
+      });
+
+      map.on('move moveend zoomend', function() { if (crosshairMode) updateCrosshair(); });
+      window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
+
+      window.closeModal = closeModal;
+      window.openModal = openModal;
+      window.toggleLayer = toggleLayer;
+
+      console.log('2×2 Радар загружен. Палитры:', palettes);
+    })();
