@@ -292,4 +292,72 @@
   window.toggleLayer = toggleLayer;
 
   console.log('2×2 Радар загружен.');
+    // ─── ПРОЗРАЧНОСТЬ СЛОЯ ─────────────────────────────────
+  var opacitySlider = $('opacity-slider');
+  var opacityVal = $('opacity-val');
+  if (opacitySlider) {
+    opacitySlider.addEventListener('input', function() {
+      var val = parseInt(this.value);
+      canvas.style.opacity = val / 100;
+      opacityVal.textContent = val + '%';
+    });
+  }
+
+  // ─── МОДАЛЬНОЕ ОКНО СПРАВКИ ────────────────────────────
+  var helpModal = $('help-modal');
+  var helpClose = $('help-close');
+  if ($('btn-help')) {
+    $('btn-help').addEventListener('click', function() {
+      if (helpModal) helpModal.classList.add('open');
+    });
+  }
+  if (helpClose) {
+    helpClose.addEventListener('click', function() {
+      if (helpModal) helpModal.classList.remove('open');
+    });
+  }
+
+  // ─── ПЕРЕКЛЮЧЕНИЕ ТЕМЫ ─────────────────────────────────
+  if ($('btn-theme')) {
+    $('btn-theme').addEventListener('click', function() {
+      document.body.classList.toggle('light-theme');
+      var isLight = document.body.classList.contains('light-theme');
+      toast(isLight ? 'Светлая тема включена' : 'Темная тема включена');
+      
+      // Меняем подложку карты в зависимости от темы
+      if (map.hasLayer(darkTileLayer)) {
+        map.removeLayer(darkTileLayer);
+        lightTileLayer.addTo(map);
+      } else {
+        map.removeLayer(lightTileLayer);
+        darkTileLayer.addTo(map);
+      }
+    });
+  }
+
+  // ─── ДОБАВИТЬ СЛОИ КАРТЫ ДЛЯ ТЕМЫ ──────────────────────
+  // Находим текущий слой и создаем светлый
+  var darkTileLayer = null;
+  var lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20 });
+  
+  map.eachLayer(function(layer) {
+    if (layer instanceof L.TileLayer) {
+      darkTileLayer = layer;
+    }
+  });
+
+  // ─── УЛУЧШЕНИЕ РАБОТЫ ПРИЦЕЛА ──────────────────────────
+  // Обновляем прицел сразу при движении мыши, если он включен
+  map.on('mousemove', function(e) {
+    if (crosshairMode) {
+      requestAnimationFrame(updateCrosshair);
+    }
+  });
+
+  // Принудительно обновляем прицел при изменении масштаба
+  map.on('zoomstart', function() {
+    if (crosshairMode) {
+      hoverEl.style.display = 'none';
+    }
+  });
 })();
