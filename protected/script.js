@@ -6,28 +6,52 @@
   window.closePanel = function(id) { var el = $(id); if (el) { el.style.display = 'none'; hiddenPanels[id] = true; } var rb = $('restore-' + id); if (rb) rb.style.display = 'block'; };
   window.restorePanel = function(id) { var el = $(id); if (el) { var flexPanels = { ctrl: 1, tl: 1 }; el.style.display = flexPanels[id] ? 'flex' : 'block'; hiddenPanels[id] = false; } var rb = $('restore-' + id); if (rb) rb.style.display = 'none'; };
 
-  var SRC = 'https://rainradar.ru/composite', FZ = 5, MDBZ = 5, DELAY = 600, STEP = 600;
+  var SRC = 'https://rainradar.ru/composite', FZ = 5, MDBZ = -30, DELAY = 600, STEP = 600;
   var HISTORY_MINUTES = 190, MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
   var BASE_RES_KM = 2;
 
   var BUILTIN_RADAR = [
-    { v: 80, r: [255, 0, 255], l: '80+ Экстремальное' }, { v: 70, r: [160, 0, 255], l: '70 Очень сильное' },
-    { v: 65, r: [100, 0, 255], l: '65 Град/Шквал' }, { v: 55, r: [255, 0, 0], l: '55 Гроза 100%' },
-    { v: 50, r: [255, 80, 80], l: '50 Гроза 70%' }, { v: 40, r: [255, 170, 0], l: '40 Гроза 30%' },
-    { v: 35, r: [255, 230, 0], l: '35 Сильный ливень' }, { v: 30, r: [0, 255, 100], l: '30 Ливень' },
-    { v: 25, r: [0, 255, 200], l: '25 Слабый ливень' }, { v: 20, r: [0, 200, 255], l: '20 Умеренные осадки' },
-    { v: 15, r: [0, 150, 255], l: '15 Слабые осадки' }, { v: 6, r: [0, 100, 200], l: '6 Облачность' }
+    { v: 70, r: [113, 0, 0], l: '70 dBZ' },
+    { v: 65, r: [168, 0, 254], l: '65 dBZ' },
+    { v: 60, r: [244, 0, 244], l: '60 dBZ' },
+    { v: 55, r: [0, 168, 0], l: '55 dBZ' },
+    { v: 50, r: [73, 219, 0], l: '50 dBZ' },
+    { v: 40, r: [254, 58, 54], l: '40 dBZ' },
+    { v: 35, r: [254, 125, 0], l: '35 dBZ' },
+    { v: 30, r: [254, 254, 0], l: '30 dBZ' },
+    { v: 25, r: [0, 0, 125], l: '25 dBZ' },
+    { v: 20, r: [0, 0, 205], l: '20 dBZ' },
+    { v: 15, r: [0, 76, 254], l: '15 dBZ' },
+    { v: 10, r: [0, 168, 254], l: '10 dBZ' },
+    { v: 5, r: [83, 254, 56], l: '5 dBZ' },
+    { v: 0, r: [205, 254, 151], l: '0 dBZ' },
+    { v: -5, r: [170, 207, 234], l: '-5 dBZ' },
+    { v: -10, r: [165, 165, 165], l: '-10 dBZ' },
+    { v: -30, r: [217, 217, 217], l: '-30 dBZ' }
   ];
+
+  // НОВАЯ ОСНОВНАЯ ПАЛИТРА ОЯ ЯВЛЕНИЯ
   var BUILTIN_WX = [
-    { v: 95, r: [255, 255, 255], l: 'Смерч' }, { v: 90, r: [255, 0, 80], l: 'Шквал сильный' },
-    { v: 85, r: [255, 50, 120], l: 'Шквал умеренный' }, { v: 80, r: [255, 100, 160], l: 'Шквал слабый' },
-    { v: 75, r: [255, 0, 255], l: 'Град сильный' }, { v: 70, r: [200, 0, 255], l: 'Град умеренный' },
-    { v: 65, r: [150, 0, 255], l: 'Град слабый' }, { v: 55, r: [255, 100, 100], l: 'Гроза >90%' },
-    { v: 50, r: [255, 150, 100], l: 'Гроза 71-90%' }, { v: 40, r: [255, 200, 100], l: 'Гроза 30-70%' },
-    { v: 35, r: [0, 150, 255], l: 'Ливень сильный' }, { v: 30, r: [0, 200, 255], l: 'Ливень умеренный' },
-    { v: 25, r: [0, 255, 255], l: 'Ливень слабый' }, { v: 20, r: [100, 255, 150], l: 'Осадки сильные' },
-    { v: 15, r: [150, 255, 100], l: 'Осадки умеренные' }, { v: 6, r: [200, 255, 50], l: 'Осадки слабые' },
-    { v: 0, r: [150, 200, 255], l: 'Облака' }
+    { v: 70, r: [43, 43, 43], l: 'Смерч' },
+    { v: 65, r: [128, 60, 110], l: 'Шквал сильный' },
+    { v: 59, r: [204, 117, 181], l: 'Шквал умеренный' },
+    { v: 57, r: [253, 201, 239], l: 'Шквал слабый' },
+    { v: 54, r: [77, 57, 35], l: 'Град сильный' },
+    { v: 52, r: [112, 84, 51], l: 'Град умеренный' },
+    { v: 50, r: [161, 123, 79], l: 'Град слабый' },
+    { v: 48, r: [255, 61, 61], l: 'Гроза A+ (>90%)' },
+    { v: 46, r: [220, 80, 80], l: 'Гроза A (71-90%)' },
+    { v: 45, r: [242, 186, 156], l: 'Гроза B (30-70%)' },
+    { v: 37, r: [15, 55, 107], l: 'Ливень сильный' },
+    { v: 35, r: [37, 87, 152], l: 'Ливень умеренный' },
+    { v: 30, r: [75, 149, 247], l: 'Ливень слабый' },
+    { v: 28, r: [238, 240, 132], l: 'Осадки сильные' },
+    { v: 24, r: [26, 97, 64], l: 'Осадки умеренные' },
+    { v: 16, r: [53, 146, 103], l: 'Осадки слабые' },
+    { v: 13, r: [88, 249, 174], l: 'Морось' },
+    { v: 9, r: [129, 204, 223], l: 'Легкая морось' },
+    { v: 0.5, r: [145, 145, 145], l: 'Облака' },
+    { v: 0, r: [107, 107, 107], l: 'Нет явления' }
   ];
 
   var S = {
@@ -336,7 +360,7 @@
   function renderPaletteList() { var list = palettes[currentLayerForModal].list; var activeIdx = palettes[currentLayerForModal].activeIdx; var html = ''; list.forEach(function(p, idx) { var activeClass = idx === activeIdx ? 'active' : ''; var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : ''; var editBtn = p.builtin ? '' : '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>'; html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' + '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' + '<div>' + editBtn + (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') + '</div></div>'; }); paletteListContainer.innerHTML = html; paletteListContainer.querySelectorAll('.palette-item').forEach(function(el) { el.addEventListener('click', function(e) { if (e.target.classList.contains('del') || e.target.classList.contains('edit-btn')) return; var idx = parseInt(this.dataset.idx); palettes[currentLayerForModal].activeIdx = idx; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } }); }); paletteListContainer.querySelectorAll('.edit-btn').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); startEditingPalette(idx); }); }); paletteListContainer.querySelectorAll('.del').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); var list2 = palettes[currentLayerForModal].list; if (list2[idx].builtin) return; if (confirm('Удалить палитру "' + list2[idx].name + '"?')) { list2.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx = list2.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } }); }); }
   function startEditingPalette(idx) { var list = palettes[currentLayerForModal].list; if (idx < 0 || idx >= list.length) return; var pal = list[idx]; if (pal.builtin) { toast('Встроенную палитру нельзя редактировать'); return; } editingIndex = idx; newPalName.value = pal.name; tempEntries = pal.items.map(function(item) { return { val: item.v, color: '#' + item.r.map(function(c) { return c.toString(16).padStart(2, '0'); }).join(''), label: item.l, r: { r: item.r[0], g: item.r[1], b: item.r[2] } }; }); editingEntryIndex = -1; renderEntries(); createForm.classList.add('open'); savePaletteBtn.textContent = '💾 Обновить'; toast('Редактирование палитры "' + pal.name + '"'); }
   function closeForm() { createForm.classList.remove('open'); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); savePaletteBtn.textContent = '💾 Сохранить'; newPalName.value = 'Новая палитра'; entryVal.value = '0'; entryColor.value = '#00aaff'; entryLabel.value = 'Осадки'; }
-  function renderEntries() { entriesList.innerHTML = ''; tempEntries.forEach(function(e, idx) { var div = document.createElement('div'); div.className = 'entry'; if (editingEntryIndex === idx) { div.innerHTML = `<input type="number" class="edit-val" value="${e.val}" step="1" style="width:50px;background:#121212;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;"><input type="color" class="edit-color" value="${e.color}" style="width:28px;height:28px;padding:0;border:0;background:transparent;cursor:pointer;"><input type="text" class="edit-label" value="${escHtml(e.label)}" style="flex:1;background:#121212;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;"><button class="save-entry-btn" data-idx="${idx}" style="background:#4a7fe8;border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-weight:600;">✓</button>`; } else { div.innerHTML = `<span><span class="color-swatch" style="background:${e.color}"></span> ${e.val} → ${escHtml(e.label)}</span><div><button class="edit-entry-btn" data-idx="${idx}" style="background:none;border:none;color:#888;cursor:pointer;font-size:12px;margin-right:4px;">✎</button><button class="del-entry" data-idx="${idx}" style="background:none;border:none;color:#ff5252;cursor:pointer;font-size:12px;">✕</button></div>`; } entriesList.appendChild(div); }); entriesList.querySelectorAll('.save-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); var entryDiv = this.closest('.entry'); var valInput = entryDiv.querySelector('.edit-val'); var colorInput = entryDiv.querySelector('.edit-color'); var labelInput = entryDiv.querySelector('.edit-label'); var newVal = parseFloat(valInput.value); if (isNaN(newVal)) { toast('Введите число'); return; } var newColor = colorInput.value; var newLabel = labelInput.value.trim() || 'без метки'; var rgb = hexToRgb(newColor); if (!rgb) { toast('Неверный цвет'); return; } tempEntries[idx] = { val: newVal, color: newColor, label: newLabel, r: rgb }; editingEntryIndex = -1; renderEntries(); }); }); entriesList.querySelectorAll('.edit-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); editingEntryIndex = idx; renderEntries(); }); }); entriesList.querySelectorAll('.del-entry').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); tempEntries.splice(idx, 1); if (editingEntryIndex === idx) editingEntryIndex = -1; else if (editingEntryIndex > idx) editingEntryIndex--; renderEntries(); }); }); }
+  function renderEntries() { entriesList.innerHTML = ''; tempEntries.forEach(function(e, idx) { var div = document.createElement('div'); div.className = 'entry'; if (editingEntryIndex === idx) { div.innerHTML = `<input type="number" class="edit-val" value="${e.val}" step="1" style="width:50px;background:#121212;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;"><input type="color" class="edit-color" value="${e.color}" style="width:28px;height:28px;padding:0;border:0;background:transparent;cursor:pointer;"><input type="text" class="edit-label" value="${escHtml(e.label)}" style="flex:1;background:#121212;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;"><button class="save-entry-btn" data-idx="${idx}" style="background:#4a7fe8;border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-weight:600;">✓</button>`; } else { div.innerHTML = `<span><span class="color-swatch" style="background:${e.color}"></span> ${e.val} → ${escHtml(e.label)}</span><div><button class="edit-entry-btn" data-idx="${idx}" style="background:none;border:none;color:#888;cursor:pointer;font-size:12px;margin-right:4px;">✎</button><button class="del-entry" data-idx="${idx}" style="background:none;border:none;color:#ff5252;cursor:pointer;font-size:12px;">✕</button></div>`; } entriesList.appendChild(div); }); entriesList.querySelectorAll('.save-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); var entryDiv = this.closest('.entry'); var valInput = entryDiv.querySelector('.edit-val'); var colorInput = entryDiv.querySelector('.edit-color'); var labelInput = entryDiv.querySelector('.edit-label'); var newVal = parseFloat(valInput.value); if (isNaN(newVal)) { toast('Введите число'); return; } var newColor = colorInput.value; var newLabel = labelInput.value.trim() || 'без метки'; var rgb = hexToRgb(newColor); if (!rgb) { toast('Неверный цвет'; return; } tempEntries[idx] = { val: newVal, color: newColor, label: newLabel, r: rgb }; editingEntryIndex = -1; renderEntries(); }); }); entriesList.querySelectorAll('.edit-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); editingEntryIndex = idx; renderEntries(); }); }); entriesList.querySelectorAll('.del-entry').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); tempEntries.splice(idx, 1); if (editingEntryIndex === idx) editingEntryIndex = -1; else if (editingEntryIndex > idx) editingEntryIndex--; renderEntries(); }); }); }
   function addEntry() { var v = parseFloat(entryVal.value); if (isNaN(v)) { toast('Введите число'); return; } var color = entryColor.value; var label = entryLabel.value.trim() || 'без метки'; var rgb = hexToRgb(color); if (!rgb) { toast('Неверный цвет'); return; } tempEntries.push({ val: v, color: color, label: label, r: rgb }); renderEntries(); entryVal.value = ''; entryLabel.value = ''; var maxVal = tempEntries.reduce(function(mx, e) { return Math.max(mx, e.val); }, 0); entryVal.value = (maxVal + 5); }
   function hexToRgb(hex) { var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null; }
   function savePalette() { var name = newPalName.value.trim() || 'Без названия'; if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; } var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; }); var items = sorted.map(function(e) { return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label }; }); if (editingIndex >= 0) { var list = palettes[currentLayerForModal].list; if (editingIndex >= list.length) { toast('Ошибка: палитра не найдена'); return; } if (list[editingIndex].builtin) { toast('Нельзя редактировать встроенную палитру'); return; } list[editingIndex].name = name; list[editingIndex].items = items; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" обновлена'); closeForm(); } else { var newPal = { name: name, items: items, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" сохранена'); closeForm(); } }
@@ -358,7 +382,6 @@
   deletePaletteBtn.addEventListener('click', function() { var list = palettes[currentLayerForModal].list; var idx = palettes[currentLayerForModal].activeIdx; if (idx >= list.length) return; if (list[idx].builtin) { toast('Нельзя удалить встроенную палитру'); return; } if (confirm('Удалить активную палитру "' + list[idx].name + '"?')) { list.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } });
   $('btn-palettes').addEventListener('click', openModal);
 
-  // Инициализация слайдера прозрачности
   var opacitySlider = $('opacity-slider');
   var opacityVal = $('opacity-val');
   if (opacitySlider) {
@@ -410,5 +433,5 @@
   window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
 
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
-  console.log('2×2 Радар загружен. 1x1 км интерполяция, EUMETSAT WMS и z-index линейки активны.');
+  console.log('2×2 Радар загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
 })();
