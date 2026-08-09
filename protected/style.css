@@ -129,13 +129,14 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 .ruler-line { stroke: var(--accent) !important; stroke-width: 2 !important; stroke-dasharray: 6 4 !important; }
 .ruler-label, .ruler-segment-label { color: #fff !important; font-size: 11px !important; font-weight: 700 !important; background: var(--glass-bg) !important; backdrop-filter: blur(12px) !important; padding: 4px 10px !important; border-radius: 8px !important; border: 1px solid var(--glass-border) !important; box-shadow: var(--shadow) !important; }
 
+/* ─── СВЕТЛАЯ ТЕМА ─── */
 body.light-theme { background: #f0f2f5 !important; color: #1a1a1a !important; }
 body.light-theme .panel, body.light-theme .restore-btn, body.light-theme #pixel-popup, body.light-theme #crosshair-label, body.light-theme #time-tooltip, body.light-theme .modal-content { background: rgba(255, 255, 255, 0.6) !important; border-color: rgba(0, 0, 0, 0.05) !important; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important; }
 body.light-theme .btn { color: rgba(0, 0, 0, 0.5); }
 body.light-theme .btn:hover { background: rgba(0, 0, 0, 0.05); color: #000; }
 body.light-theme .btn.on { background: var(--accent); color: #fff; }
 body.light-theme #legend-header h3, body.light-theme #dbg, body.light-theme .tt-time { color: #1a1a1a !important; }
-body.light-theme .tt-diff { background: rgba(0,0,0,0.05); }
+body.light-theme .tt-diff { background: rgba(0,0,0,0.05); color: #1a1a1a !important; }
 body.light-theme #track { background: rgba(0,0,0,0.1); }
 body.light-theme .modal-tabs { background: rgba(0,0,0,0.05); }
 body.light-theme .modal-tabs button.active { background: rgba(0,0,0,0.1); color: #000; }
@@ -144,3 +145,7 @@ body.light-theme .create-form input { background: rgba(255,255,255,0.5); color: 
 body.light-theme .entries-list .entry { border-color: rgba(0,0,0,0.05); }
 body.light-theme .leaflet-container { background: #e9eef3 !important; }
 body.light-theme .ruler-label, body.light-theme .ruler-segment-label { background: rgba(255,255,255,0.7) !important; color: #000 !important; }
+body.light-theme .li { color: #1a1a1a !important; }
+body.light-theme .lsq { border-color: rgba(0,0,0,0.1) !important; }
+body.light-theme .popup-label, body.light-theme .popup-meta, body.light-theme .popup-close { color: #333 !important; }
+body.light-theme .tt-date { color: rgba(0,0,0,0.5) !important; }
