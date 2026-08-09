@@ -456,31 +456,20 @@
 
   async function fetchLightning() {
     try {
-      const res = await fetch('/api/lightning', { cache: 'no-store' });
+      // Получаем границы видимой карты
+      var b = map.getBounds();
+      var url = `/api/lightning?minLat=${b.getSouth()}&maxLat=${b.getNorth()}&minLon=${b.getWest()}&maxLon=${b.getEast()}`;
+      
+      const res = await fetch(url, { cache: 'no-store' });
       const strikes = await res.json();
       lightningLayer.clearLayers();
       
-      var now = Date.now();
-      var oneHourAgo = now - 3600000; // 1 час в миллисекундах
-
       strikes.forEach(function(strike) {
-        // Формат Blitzortung может быть [time, lat, lon] или [lat, lon, time]
-        var lat, lon, time;
-        if (strike[0] > 100000) { // Если первый элемент - это timestamp
-          time = strike[0];
-          lat = strike[1];
-          lon = strike[2];
-        } else {
-          lat = strike[0];
-          lon = strike[1];
-          time = strike[2];
-        }
-
-        // Переводим секунды в миллисекунды, если нужно
-        if (time < 10000000000) time *= 1000;
+        // Сервер возвращает [lat, lon]
+        var lat = strike[0];
+        var lon = strike[1];
         
-        // Проверяем, что координаты валидны и молния свежая (до 1 часа)
-        if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && time >= oneHourAgo) {
+        if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
           var bounds = getSquareBounds(lat, lon, 0.5); // Квадрат 0.5x0.5 км
           L.rectangle(bounds, {
             color: "#ffeb3b", 
@@ -505,11 +494,14 @@
         lightningLayer.addTo(map);
         fetchLightning();
         lightningInterval = setInterval(fetchLightning, 60000); // Обновление каждую минуту
+        // Обновляем при перемещении карты
+        map.on('moveend', fetchLightning);
         toast('Молнии включены (Blitzortung)');
       } else {
         btn.classList.remove('on');
         lightningLayer.clearLayers();
         if (lightningInterval) clearInterval(lightningInterval);
+        map.off('moveend', fetchLightning);
         toast('Молнии выключены');
       }
     }
