@@ -149,8 +149,6 @@
       <input type="range" id="opacity-slider" min="0" max="100" value="100" />
       <span id="opacity-val">100%</span>
     </div>
-    <div class="sep"></div>
-    <button class="btn" id="btn-logout" title="Выйти из системы" style="color:#ff4d6d;">⏻ Выход</button>
   </div>
 
   <div class="panel glass" id="legend">
@@ -220,8 +218,13 @@
     </div>
   </div>
 
-  <!-- СКРЫТАЯ КНОПКА ДЛЯ СОВМЕСТИМОСТИ С script.js -->
-  <button id="splash-enter" style="display:none;"></button>
+  <!-- СКРЫТАЯ ЗАСТАВКА (чтобы script.js не выдавал ошибку отсутствующих элементов) -->
+  <div id="splash-screen" style="display: none;">
+    <div class="loader-bar"><div class="loader-fill" id="loader-fill"></div></div>
+    <div class="loader-label" id="loader-label">ЗАГРУЗКА СИСТЕМЫ...</div>
+    <div class="boot-lines" id="boot-lines"></div>
+    <button class="enter-btn" id="splash-enter"></button>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
@@ -307,11 +310,7 @@
       }
     });
 
-    document.getElementById('btn-logout').addEventListener('click', async () => {
-      await fetch('/api/auth?action=logout', { method: 'POST' });
-      window.location.reload();
-    });
-
+    // Проверяем авторизацию сразу при загрузке страницы
     checkAuth();
   </script>
   <script src="script.js"></script>
