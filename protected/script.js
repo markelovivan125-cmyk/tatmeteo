@@ -457,27 +457,27 @@
   async function fetchLightning() {
     try {
       var b = map.getBounds();
-      var url = `/api/lightning?minLat=${b.getSouth()}&maxLat=${b.getNorth()}&minLon=${b.getWest()}&maxLon=${b.getEast()}`;
       
-      const res = await fetch(url, { cache: 'no-store' });
-      const strikes = await res.json();
-      
-      // Если сервер вернул ошибку, показываем её
-      if (strikes.error) {
-        toast('⚠️ Ошибка молний: ' + strikes.error);
+      // Запрос прямо из браузера через CORS-прокси (обход 401 ошибки)
+      const res = await fetch('https://corsproxy.io/?url=' + encodeURIComponent('http://data.blitzortung.org/Data/Protected/strikes.json'), { cache: 'no-store' });
+      if (!res.ok) {
+        toast('⚠️ Ошибка молний: ' + res.status);
         return;
       }
-
+      
+      const strikes = await res.json();
       lightningLayer.clearLayers();
       
-      // Если молний нет, просто ничего не рисуем
-      if (strikes.length === 0) return;
+      var now = Date.now();
+      var oneHourAgo = now / 1000 - 3600; // 1 час в секундах
       
       strikes.forEach(function(strike) {
-        var lat = strike[0];
-        var lon = strike[1];
+        // Формат: [time, lat, lon, status]
+        var time = strike[0];
+        var lat = strike[1];
+        var lon = strike[2];
         
-        if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+        if (time >= oneHourAgo && lat >= b.getSouth() && lat <= b.getNorth() && lon >= b.getWest() && lon <= b.getEast()) {
           var bounds = getSquareBounds(lat, lon, 0.5); // Квадрат 0.5x0.5 км
           L.rectangle(bounds, {
             color: "#ffeb3b", 
@@ -488,6 +488,8 @@
           }).addTo(lightningLayer);
         }
       });
+      
+      toast('⚡ Обновлено молний: ' + strikes.length);
     } catch (e) {
       toast('⚠️ Сбой сети при загрузке молний');
       console.error('Lightning fetch error:', e);
