@@ -19,8 +19,6 @@
         .ip-list { color: #aaa; font-size: 12px; margin-top: 4px; }
         .err { color: #ff5252; font-family: monospace; background: #2a0000; padding: 10px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
         .summary { background: #111; padding: 10px 15px; border-radius: 5px; margin-bottom: 20px; font-size: 14px; color: #7ab4ff; border: 1px solid #333; }
-        
-        /* Стили формы входа */
         #login-box { background: #1a1a1a; padding: 30px; border-radius: 8px; max-width: 400px; margin: 50px auto; text-align: center; }
         #login-box input { width: 100%; padding: 12px; margin-bottom: 15px; background: #0a0a0a; border: 1px solid #444; color: #fff; border-radius: 5px; box-sizing: border-box; }
     </style>
@@ -28,7 +26,6 @@
 <body>
     <h1>Админ-панель</h1>
 
-    <!-- Форма входа (показывается, если нет авторизации) -->
     <div id="login-box" style="display: none;">
         <h3>🔒 Вход для администратора</h3>
         <input type="password" id="master-pass" placeholder="Введите мастер-пароль">
@@ -36,7 +33,6 @@
         <div class="err" id="login-err" style="margin-top: 10px; background: transparent;"></div>
     </div>
 
-    <!-- Панель управления (показывается после входа) -->
     <div id="dashboard" style="display: none;">
         <div class="summary" id="summary">Загрузка статистики...</div>
         <button id="gen">➕ Сгенерировать новый пароль</button>
@@ -44,17 +40,14 @@
     </div>
 
     <script>
-        // Функция проверки, авторизованы ли мы
         async function checkAuth() {
             try {
                 const res = await fetch('/api/admin');
                 if (res.ok) {
-                    // Если сервер пускает (200 OK), показываем панель
                     document.getElementById('login-box').style.display = 'none';
                     document.getElementById('dashboard').style.display = 'block';
                     load();
                 } else {
-                    // Если 403, показываем форму входа
                     document.getElementById('login-box').style.display = 'block';
                     document.getElementById('dashboard').style.display = 'none';
                 }
@@ -63,7 +56,6 @@
             }
         }
 
-        // Вход в админку
         document.getElementById('login-btn').onclick = async () => {
             const pass = document.getElementById('master-pass').value;
             const errBox = document.getElementById('login-err');
@@ -76,7 +68,7 @@
             });
 
             if (res.ok) {
-                checkAuth(); // Проверяем снова, теперь должно пустить
+                checkAuth();
             } else {
                 const data = await res.json();
                 errBox.textContent = data.error || 'Ошибка входа';
@@ -84,14 +76,10 @@
             }
         };
 
-        // Загрузка данных панели
         async function load() {
             try {
                 const res = await fetch('/api/admin');
-                if (!res.ok) {
-                    checkAuth(); // Если сессия истекла, снова покажет форму входа
-                    return;
-                }
+                if (!res.ok) { checkAuth(); return; }
                 const data = await res.json();
                 
                 let totalPasswords = data.passwords.length;
@@ -143,7 +131,6 @@
             }
         }
 
-        // Запускаем проверку при открытии страницы
         checkAuth();
         setInterval(load, 5000);
     </script>
