@@ -15,8 +15,12 @@ export default async function handler(req, res) {
 
   let isAuth = false;
   if (passMatch && sidMatch) {
-    const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
-    if (exists === 1) isAuth = true;
+    try {
+      const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
+      if (exists === 1) isAuth = true;
+    } catch (e) {
+      console.error('Redis error in serve.js:', e);
+    }
   }
 
   if (!isAuth) {
@@ -25,12 +29,17 @@ export default async function handler(req, res) {
     return;
   }
 
-  // 2. Отдача файлов
-  let reqPath = req.url === '/' ? '/index.html' : req.url;
-  reqPath = reqPath.split('?')[0]; // Убираем параметры (?v=123)
+  // 2. Определение запрошенного файла
+  let reqPath = req.url;
+  if (reqPath.includes('?path=')) {
+    reqPath = '/' + reqPath.split('?path=')[1];
+  } else if (reqPath === '/' || reqPath === '/api/serve') {
+    reqPath = '/index.html';
+  }
   
-  // Защита от выхода за пределы папки
-  reqPath = reqPath.replace(/\.\.\//g, '');
+  reqPath = reqPath.split('?')[0]; // Убираем остальные параметры
+  reqPath = decodeURIComponent(reqPath);
+  reqPath = reqPath.replace(/\.\.\//g, ''); // Защита от выхода из папки
 
   const filePath = path.join(process.cwd(), 'protected', reqPath);
   
