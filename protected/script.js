@@ -130,33 +130,151 @@
   function CK(x, y) { return makeCK(S.layer, S.ts, S.px, x, y); }
   function getColor(raw) { if (raw < MDBZ) return null; var items = getCurrentPaletteItems(); for (var i = 0; i < items.length; i++) { if (raw >= items[i].v) return items[i].r; } return null; }
 
+  // ─── ИНТЕРПОЛЯЦИЯ 1х1 КМ ──────────────────────────────────
+  // Разбивает пиксели 2х2 км на 1х1 км с вычислением промежуточных значений dBZ
+  function interpolateRaw(raw, w, h, scale) {
+    var nw = w * scale, nh = h * scale;
+    var newRaw = new Float32Array(nw * nh);
+    for (var y = 0; y < nh; y++) {
+      for (var x = 0; x < nw; x++) {
+        var gx = x / scale;
+        var gy = y / scale;
+        var x0 = Math.floor(gx);
+        var y0 = Math.floor(gy);
+        var x1 = Math.min(x0 + 1, w - 1);
+        var y1 = Math.min(y0 + 1, h - 1);
+        var tx = gx - x0;
+        var ty = gy - y0;
+
+        var p00 = raw[y0 * w + x0];
+        var p01 = raw[y0 * w + x1];
+        var p10 = raw[y1 * w + x0];
+        var p11 = raw[y1 * w + x1];
+
+        if (p00 < 0 && p01 < 0 && p10 < 0 && p11 < 0) {
+          newRaw[y * nw + x] = -1;
+        } else {
+          var sum = 0, count = 0;
+          if (p00 >= 0) { sum += p00 * (1-tx) * (1-ty); count += (1-tx)*(1-ty); }
+          if (p01 >= 0) { sum += p01 * tx * (1-ty); count += tx*(1-ty); }
+          if (p10 >= 0) { sum += p10 * (1-tx) * ty; count += (1-tx)*ty; }
+          if (p11 >= 0) { sum += p11 * tx * ty; count += tx*ty; }
+          newRaw[y * nw + x] = count > 0 ? sum / count : -1;
+        }
+      }
+    }
+    return { data: newRaw, w: nw, h: nh };
+  }
+
   // ─── сглаживание ──────────────────────────────────────────
-  function applySmoothing(raw, w, h, strength) { if (strength === 0) return raw; var size = strength * 2 + 1; var half = Math.floor(size / 2); var result = new Float32Array(raw.length); var kernel = []; var sigma = strength * 0.6 + 0.5; var sum = 0; for (var i = -half; i <= half; i++) { for (var j = -half; j <= half; j++) { var d = Math.sqrt(i * i + j * j); var val = Math.exp(-(d * d) / (2 * sigma * sigma)); kernel.push(val); sum += val; } } for (var ki = 0; ki < kernel.length; ki++) kernel[ki] /= sum; var kw = size, kh = size; for (var y = 0; y < h; y++) { for (var x = 0; x < w; x++) { var acc = 0, wsum = 0; for (var ky = -half; ky <= half; ky++) { for (var kx = -half; kx <= half; kx++) { var px = x + kx, py = y + ky; if (px < 0 || px >= w || py < 0 || py >= h) continue; var idx = py * w + px; if (raw[idx] >= 0) { var kidx = (ky + half) * kw + (kx + half); acc += raw[idx] * kernel[kidx]; wsum += kernel[kidx]; } } } var idx2 = y * w + x; result[idx2] = (wsum > 0) ? acc / wsum : -1; } } return result; }
+  function applySmoothing(raw, w, h, strength) { 
+    if (strength === 0) return raw; 
+    var size = strength * 2 + 1; 
+    var half = Math.floor(size / 2); 
+    var result = new Float32Array(raw.length); 
+    var kernel = []; 
+    var sigma = strength * 0.6 + 0.5; 
+    var sum = 0; 
+    for (var i = -half; i <= half; i++) { 
+      for (var j = -half; j <= half; j++) { 
+        var d = Math.sqrt(i * i + j * j); 
+        var val = Math.exp(-(d * d) / (2 * sigma * sigma)); 
+        kernel.push(val); sum += val; 
+      } 
+    } 
+    for (var ki = 0; ki < kernel.length; ki++) kernel[ki] /= sum; 
+    var kw = size, kh = size; 
+    for (var y = 0; y < h; y++) { 
+      for (var x = 0; x < w; x++) { 
+        var acc = 0, wsum = 0; 
+        for (var ky = -half; ky <= half; ky++) { 
+          for (var kx = -half; kx <= half; kx++) { 
+            var px = x + kx, py = y + ky; 
+            if (px < 0 || px >= w || py < 0 || py >= h) continue; 
+            var idx = py * w + px; 
+            if (raw[idx] >= 0) { 
+              var kidx = (ky + half) * kw + (kx + half); 
+              acc += raw[idx] * kernel[kidx]; wsum += kernel[kidx]; 
+            } 
+          } 
+        } 
+        var idx2 = y * w + x; 
+        result[idx2] = (wsum > 0) ? acc / wsum : -1; 
+      } 
+    } 
+    return result; 
+  }
 
   // ─── обработка тайла ──────────────────────────────────────
   function processTile(img, px, smooth, smoothStrength) {
     var src = document.createElement('canvas'); src.width = src.height = 256; var sc = src.getContext('2d'); sc.drawImage(img, 0, 0);
     var id = sc.getImageData(0, 0, 256, 256), d = id.data;
-    var raw = new Float32Array(256 * 256);
-    for (var i = 0; i < d.length; i += 4) { if (d[i + 3] > 0) { var v = (d[i] + d[i + 1] + d[i + 2]) / 3 | 0; raw[i / 4] = v; } else { raw[i / 4] = -1; } }
-    var smoothed = raw;
-    if (smooth && smoothStrength > 0) { smoothed = applySmoothing(raw, 256, 256, smoothStrength); }
-    var out = document.createElement('canvas'); out.width = out.height = 256; var oc = out.getContext('2d'); oc.imageSmoothingEnabled = false;
-    var effectivePx = (px < 1) ? 1 : px; var bw = Math.ceil(256 / effectivePx), bh = Math.ceil(256 / effectivePx);
-    for (var py = 0; py < bh; py++) { for (var pxx = 0; pxx < bw; pxx++) { var x0 = pxx * effectivePx, y0 = py * effectivePx, x1 = Math.min(x0 + effectivePx, 256), y1 = Math.min(y0 + effectivePx, 256); var sum = 0, n = 0; for (var yy = y0; yy < y1; yy++) { for (var xx = x0; xx < x1; xx++) { var idx = yy * 256 + xx; if (smoothed[idx] >= 0) { sum += smoothed[idx]; n++; } } } if (n > 0) { var avg = Math.round(sum / n); var rgb = getColor(avg); if (rgb) { oc.fillStyle = 'rgb(' + rgb.join(',') + ')'; oc.fillRect(x0, y0, x1 - x0, y1 - y0); } } } }
     
-    var finalCanvas = out;
-    if (px < 1) {
-      var scale = 1 / px;
-      var bigCanvas = document.createElement('canvas');
-      bigCanvas.width = 256 * scale;
-      bigCanvas.height = 256 * scale;
-      var bigCtx = bigCanvas.getContext('2d');
-      bigCtx.imageSmoothingEnabled = true; // Включаем сглаживание для 1x1 км
-      bigCtx.drawImage(out, 0, 0, bigCanvas.width, bigCanvas.height);
-      finalCanvas = bigCanvas;
+    var w = 256, h = 256;
+    var raw = new Float32Array(w * h);
+    for (var i = 0; i < d.length; i += 4) { 
+      if (d[i + 3] > 0) { 
+        var v = (d[i] + d[i + 1] + d[i + 2]) / 3 | 0; 
+        raw[i / 4] = v; 
+      } else { 
+        raw[i / 4] = -1; 
+      } 
     }
-    return { canvas: finalCanvas, raw: smoothed, px: px, scaled: px < 1 };
+
+    // 1. Разбиваем 2х2 км на 1х1 км (если px < 1)
+    var targetRaw = raw;
+    var targetW = w;
+    var targetH = h;
+    if (px < 1) {
+      var scale = 1 / px; // 2 для 1км
+      var interp = interpolateRaw(raw, w, h, scale);
+      targetRaw = interp.data;
+      targetW = interp.w;
+      targetH = interp.h;
+    }
+
+    // 2. Сглаживание
+    var smoothed = targetRaw;
+    if (smooth && smoothStrength > 0) {
+      smoothed = applySmoothing(targetRaw, targetW, targetH, smoothStrength);
+    }
+
+    // 3. Раскрашиваем
+    var out = document.createElement('canvas');
+    out.width = targetW;
+    out.height = targetH;
+    var oc = out.getContext('2d');
+    oc.imageSmoothingEnabled = false;
+
+    var effectivePx = (px < 1) ? 1 : px; // Внутри нового тайла 1 пиксель = 1 ячейка
+    var bw = Math.ceil(targetW / effectivePx);
+    var bh = Math.ceil(targetH / effectivePx);
+
+    for (var py = 0; py < bh; py++) {
+      for (var pxx = 0; pxx < bw; pxx++) {
+        var x0 = pxx * effectivePx;
+        var y0 = py * effectivePx;
+        var x1 = Math.min(x0 + effectivePx, targetW);
+        var y1 = Math.min(y0 + effectivePx, targetH);
+        var sum = 0, n = 0;
+        for (var yy = y0; yy < y1; yy++) {
+          for (var xx = x0; xx < x1; xx++) {
+            var idx = yy * targetW + xx;
+            if (smoothed[idx] >= 0) { sum += smoothed[idx]; n++; }
+          }
+        }
+        if (n > 0) {
+          var avg = Math.round(sum / n);
+          var rgb = getColor(avg);
+          if (rgb) {
+            oc.fillStyle = 'rgb(' + rgb.join(',') + ')';
+            oc.fillRect(x0, y0, x1 - x0, y1 - y0);
+          }
+        }
+      }
+    }
+
+    return { canvas: out, raw: smoothed, px: px, scaled: false };
   }
 
   function bumpLoad(d) { S.loadN = Math.max(0, S.loadN + d); $('pulse').classList.toggle('busy', S.loadN > 0); }
@@ -176,21 +294,18 @@
     renderPend = false; ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
     var alpha = S.fade.active ? S.fade.alpha : 1; var tiles = visTiles(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = false;
+    
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], ck = CK(t.x, t.y), entry = S.cache.get(ck); 
       if (entry && entry.canvas) { 
         var r = tileRect(t.x, t.y); 
         if (r.sw > 0 && r.sh > 0) { 
-          if (entry.scaled) { 
-            ctx.imageSmoothingEnabled = true; // Сглаживаем при отрисовке на карте
-            ctx.drawImage(entry.canvas, 0, 0, entry.canvas.width, entry.canvas.height, r.sx, r.sy, r.sw, r.sh); 
-            ctx.imageSmoothingEnabled = false; 
-          } else { 
-            ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); 
-          } 
+          // Тайл уже имеет нужное разрешение (512x512 для 1км), просто рисуем его
+          ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); 
         } 
       } else { fetchTile(t.x, t.y); } 
     }
+    
     ctx.globalAlpha = 1;
     if (S.layer === 'wx') { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.beginPath(); for (var gi = 0; gi < tiles.length; gi++) { var gt = tiles[gi], gr = tileRect(gt.x, gt.y); if (gr.sw <= 0 || gr.sh <= 0) continue; var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY; if (bW < 1 || bH < 1) continue; var cols = Math.ceil(256 / S.px); for (var ci = 0; ci <= cols; ci++) { var lx = gr.sx + Math.round(ci * bW) + 0.5; ctx.moveTo(lx, gr.sy); ctx.lineTo(lx, gr.sy + gr.sh); } for (var ri = 0; ri <= cols; ri++) { var ly = gr.sy + Math.round(ri * bH) + 0.5; ctx.moveTo(gr.sx, ly); ctx.lineTo(gr.sx + gr.sw, ly); } } ctx.stroke(); ctx.restore(); }
   }
@@ -254,7 +369,57 @@
   var popupVisible = false, crosshairMode = false;
   function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function findPalEntry(r, g, b) { var items = getCurrentPaletteItems(), best = null, bd = 1e9; for (var i = 0; i < items.length; i++) { var p = items[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2], d = dr * dr + dg * dg + db * db; if (d < bd) { bd = d; best = p; } } return bd < 3000 ? { label: best.l, v: best.v } : null; }
-  function getBlockAt(mx, my) { var tiles = visTiles(); for (var i = 0; i < tiles.length; i++) { var t = tiles[i], r = tileRect(t.x, t.y); if (r.sw <= 0 || r.sh <= 0 || mx < r.sx || mx >= r.sx + r.sw || my < r.sy || my >= r.sy + r.sh) continue; var ck = CK(t.x, t.y), entry = S.cache.get(ck); if (!entry || !entry.canvas) return null; var effectivePx = (S.px < 1) ? 1 : S.px; var oxF = Math.max(0, Math.min(255.9, (mx - r.sx) / r.sw * 256)); var oyF = Math.max(0, Math.min(255.9, (my - r.sy) / r.sh * 256)); var bx = Math.floor(oxF / effectivePx) * effectivePx; var by = Math.floor(oyF / effectivePx) * effectivePx; var bx2 = Math.min(bx + effectivePx, 256); var by2 = Math.min(by + effectivePx, 256); var cx2 = (bx + bx2) / 2 | 0; var cy2 = (by + by2) / 2 | 0; try { var pd = entry.canvas.getContext('2d').getImageData(cx2, cy2, 1, 1).data; if (!pd[3]) return null; var scX = r.sw / 256, scY = r.sh / 256; var dbz = -1; if (entry.raw && entry.raw.length > 0) { var ix = Math.round(cx2); var iy = Math.round(cy2); if (ix >= 0 && ix < 256 && iy >= 0 && iy < 256) { var rawIdx = iy * 256 + ix; if (rawIdx < entry.raw.length) { dbz = entry.raw[rawIdx]; } } } return { sx: r.sx + Math.round(bx * scX), sy: r.sy + Math.round(by * scY), sw: Math.max(4, Math.round(effectivePx * scX)), sh: Math.max(4, Math.round(effectivePx * scY)), color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')', r: pd[0], g: pd[1], b: pd[2], info: findPalEntry(pd[0], pd[1], pd[2]), dbz: dbz }; } catch (e) { return null; } } return null; }
+  
+  function getBlockAt(mx, my) { 
+    var tiles = visTiles(); 
+    for (var i = 0; i < tiles.length; i++) { 
+      var t = tiles[i], r = tileRect(t.x, t.y); 
+      if (r.sw <= 0 || r.sh <= 0 || mx < r.sx || mx >= r.sx + r.sw || my < r.sy || my >= r.sy + r.sh) continue; 
+      var ck = CK(t.x, t.y), entry = S.cache.get(ck); 
+      if (!entry || !entry.canvas) return null; 
+      
+      // Учитываем размер канваса (512 для 1км, 256 для остальных)
+      var targetSize = entry.canvas.width; 
+      var effectivePx = (S.px < 1) ? 1 : S.px; 
+      
+      var oxF = Math.max(0, Math.min(targetSize - 0.1, (mx - r.sx) / r.sw * targetSize)); 
+      var oyF = Math.max(0, Math.min(targetSize - 0.1, (my - r.sy) / r.sh * targetSize)); 
+      var bx = Math.floor(oxF / effectivePx) * effectivePx; 
+      var by = Math.floor(oyF / effectivePx) * effectivePx; 
+      var bx2 = Math.min(bx + effectivePx, targetSize); 
+      var by2 = Math.min(by + effectivePx, targetSize); 
+      var cx2 = (bx + bx2) / 2 | 0; 
+      var cy2 = (by + by2) / 2 | 0; 
+      
+      try { 
+        var pd = entry.canvas.getContext('2d').getImageData(cx2, cy2, 1, 1).data; 
+        if (!pd[3]) return null; 
+        var scX = r.sw / targetSize; 
+        var scY = r.sh / targetSize; 
+        var dbz = -1; 
+        if (entry.raw && entry.raw.length > 0) { 
+          var ix = Math.round(cx2); 
+          var iy = Math.round(cy2); 
+          if (ix >= 0 && ix < targetSize && iy >= 0 && iy < targetSize) { 
+            var rawIdx = iy * targetSize + ix; 
+            if (rawIdx < entry.raw.length) { 
+              dbz = entry.raw[rawIdx]; 
+            } 
+          } 
+        } 
+        return { 
+          sx: r.sx + Math.round(bx * scX), 
+          sy: r.sy + Math.round(by * scY), 
+          sw: Math.max(4, Math.round(effectivePx * scX)), 
+          sh: Math.max(4, Math.round(effectivePx * scY)), 
+          color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')', 
+          r: pd[0], g: pd[1], b: pd[2], info: findPalEntry(pd[0], pd[1], pd[2]), dbz: dbz 
+        }; 
+      } catch (e) { return null; } 
+    } 
+    return null; 
+  }
+  
   function updateCrosshair() { if (!crosshairMode) return; var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = 'transparent'; var info = block.info; var txt = '—'; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { txt = Math.round(block.dbz) + ' dBZ | ' + info.label; } else { txt = '≥' + info.v + ' dBZ | ' + info.label; } } else { txt = info.label; } } crosshairLbl.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + block.color + ';border:1px solid #000;vertical-align:middle;margin-right:6px"></span>' + txt; crosshairLbl.style.display = 'block'; var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh; if (ly < 8) ly = cy + 50; crosshairLbl.style.left = lx + 'px'; crosshairLbl.style.top = ly + 'px'; } else { hoverEl.style.display = 'none'; crosshairLbl.innerHTML = '<span style="color:#888">нет данных</span>'; crosshairLbl.style.display = 'block'; crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px'; crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px'; } }
   function toggleCrosshair() { crosshairMode = !crosshairMode; var btn = $('btn-crosshair'); if (crosshairMode) { btn.classList.add('on'); crosshairEl.style.display = 'block'; updateCrosshair(); } else { btn.classList.remove('on'); crosshairEl.style.display = 'none'; crosshairLbl.style.display = 'none'; hoverEl.style.display = 'none'; } if (S.ruler.active) toggleRuler(); }
   function showPopup(block, mx, my) { var info = block.info; var lbl = info ? escHtml(info.label) : '—'; var meta = ''; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info.label; } else { meta = 'Слой: <b>Отражаемость</b><br>Порог: ≥' + info.v + ' dBZ<br>Категория: ' + info.label; } } else { meta = 'Слой: <b>Явления</b><br>' + info.label; } } else { meta = 'Нет данных'; } popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color + '"></div><div class="popup-label">' + lbl + '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>'; popupEl.style.display = 'block'; popupEl.classList.remove('popup-in'); void popupEl.offsetWidth; popupEl.classList.add('popup-in'); var px2 = mx + 16, py2 = my - 55; if (px2 + 230 > innerWidth - 8) px2 = mx - 246; if (py2 < 8) py2 = 8; if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118; popupEl.style.left = px2 + 'px'; popupEl.style.top = py2 + 'px'; popupVisible = true; }
@@ -370,5 +535,5 @@
   // Пульс авторизации
   setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
 
-  console.log('2×2 Радар загружен.');
+  console.log('2×2 Радар загружен. 1x1 км интерполяция активна.');
 })();
