@@ -41,6 +41,10 @@
   S.px = S.pxLevels[S.pxIndex];
   var palettes = { radar: { list: [], activeIdx: 0 }, wx: { list: [], activeIdx: 0 } };
 
+  // Спутник (RainViewer / EUMETSAT)
+  var rvSatLayer = null;
+  var rvMeta = null;
+
   function loadPalettesFromStorage() {
     try {
       var r = localStorage.getItem('radarPalettes'), w = localStorage.getItem('wxPalettes');
@@ -135,22 +139,86 @@
   function schedRender() { if (!renderPend) { renderPend = true; requestAnimationFrame(doRender); } }
   function doRender() {
     renderPend = false; ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (S.layer === 'sat') {
+      $('dbg').textContent = '⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', {hour:'2-digit', minute:'2-digit'}) + ' | Спутник';
+      return;
+    }
     if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
     var alpha = S.fade.active ? S.fade.alpha : 1; var tiles = visTiles(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = false;
+    var hit = 0, miss = 0;
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], ck = CK(t.x, t.y), entry = S.cache.get(ck); 
-      if (entry && entry.canvas) { var r = tileRect(t.x, t.y); if (r.sw > 0 && r.sh > 0) { ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); } } else { fetchTile(t.x, t.y); } 
+      if (entry && entry.canvas) { var r = tileRect(t.x, t.y); if (r.sw > 0 && r.sh > 0) { ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); hit++; } } else { fetchTile(t.x, t.y); miss++; } 
     }
     ctx.globalAlpha = 1;
+    $('dbg').textContent = '⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', {hour:'2-digit', minute:'2-digit'}) + ' | 🟦' + hit + ' 🟥' + miss;
     if (S.layer === 'wx') { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.beginPath(); for (var gi = 0; gi < tiles.length; gi++) { var gt = tiles[gi], gr = tileRect(gt.x, gt.y); if (gr.sw <= 0 || gr.sh <= 0) continue; var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY; if (bW < 1 || bH < 1) continue; var cols = Math.ceil(256 / S.px); for (var ci = 0; ci <= cols; ci++) { var lx = gr.sx + Math.round(ci * bW) + 0.5; ctx.moveTo(lx, gr.sy); ctx.lineTo(lx, gr.sy + gr.sh); } for (var ri = 0; ri <= cols; ri++) { var ly = gr.sy + Math.round(ri * bH) + 0.5; ctx.moveTo(gr.sx, ly); ctx.lineTo(gr.sx + gr.sw, ly); } } ctx.stroke(); ctx.restore(); }
   }
 
-  map.on('move', schedRender); map.on('moveend zoomend', function() { S.failed.clear(); schedRender(); });
+  map.on('move', schedRender); map.on('moveend zoomend', function() { if (S.layer !== 'sat') S.failed.clear(); schedRender(); });
   function forceRefresh() { S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender(); }
-  function doRefresh() { setTime(nowTs(), false); buildFrames(); updHUD(); forceRefresh(); toast('Обновлено'); }
+  function doRefresh() { 
+    if (S.layer === 'sat') { fetchRainViewerSatMeta(); return; }
+    setTime(nowTs(), false); buildFrames(); updHUD(); forceRefresh(); toast('Обновлено'); 
+  }
   function updHUD() { updThumb(); }
   function updThumb() { var f = S.frames; if (!f.length) return; var r = f[f.length - 1] - f[0], p = r === 0 ? 0 : Math.max(0, Math.min(1, (S.ts - f[0]) / r)); $('tfill').style.width = p * 100 + '%'; $('tthumb').style.left = p * 100 + '%'; }
-  function buildFrames() { var mx = nowTs(), from = mx - MAX_HISTORY_SEC, frames = []; for (var t = from; t <= mx; t += STEP) frames.push(t); S.frames = frames; var el = $('tlbls'); el.innerHTML = ''; if (!frames.length) return; for (var i = 0; i < 5; i++) { var idx = Math.round(i / 4 * (frames.length - 1)); if (idx >= frames.length) idx = frames.length - 1; var s = document.createElement('span'); s.textContent = new Date(frames[idx] * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }); el.appendChild(s); } updThumb(); }
+  function buildFrames() {
+    if (S.layer === 'sat') return;
+    var mx = nowTs(), from = mx - MAX_HISTORY_SEC, frames = [];
+    for (var t = from; t <= mx; t += STEP) frames.push(t);
+    S.frames = frames;
+    buildFramesUI();
+  }
+  function buildFramesUI() {
+    var el = $('tlbls'); el.innerHTML = '';
+    if (!S.frames.length) return;
+    for (var i = 0; i < 5; i++) {
+      var idx = Math.round(i / 4 * (S.frames.length - 1));
+      if (idx >= S.frames.length) idx = S.frames.length - 1;
+      var s = document.createElement('span');
+      s.textContent = new Date(S.frames[idx] * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+      el.appendChild(s);
+    }
+    updThumb();
+  }
+
+  // ─── СПУТНИК (EUMETSAT / RainViewer) ─────────────────────────
+  async function fetchRainViewerSatMeta() {
+    $('pulse').classList.add('busy');
+    try {
+      const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+      rvMeta = await res.json();
+      var frames = [];
+      if (rvMeta.satellite && rvMeta.satellite.past) {
+        rvMeta.satellite.past.forEach(f => frames.push(f.time));
+      }
+      S.frames = frames;
+      if (S.frames.length > 0) {
+        S.ts = S.frames[S.frames.length - 1];
+        buildFramesUI();
+        updateSatLayer();
+      }
+    } catch (e) {
+      toast('⚠️ Ошибка загрузки спутника');
+    } finally {
+      $('pulse').classList.remove('busy');
+    }
+  }
+
+  function updateSatLayer() {
+    if (!rvMeta || S.layer !== 'sat' || S.frames.length === 0) return;
+    var arr = rvMeta.satellite.past.slice();
+    var closest = arr.reduce(function(prev, curr) {
+      return (Math.abs(curr.time - S.ts) < Math.abs(prev.time - S.ts) ? curr : prev);
+    });
+    S.ts = closest.time;
+    var url = `https://tilecache.rainviewer.com${closest.path}/256/{z}/{x}/{y}/0/1_1.png`;
+    if (rvSatLayer) map.removeLayer(rvSatLayer);
+    rvSatLayer = L.tileLayer(url, { opacity: parseInt($('opacity-slider').value) / 100, tileSize: 256, zIndex: 400 }).addTo(map);
+    $('dbg').textContent = '⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', {hour:'2-digit', minute:'2-digit'}) + ' | Спутник';
+    updThumb();
+  }
 
   var drag = false, timeTooltip = $('time-tooltip');
   function tsFromX(cx) { var r = $('track').getBoundingClientRect(); var p = Math.max(0, Math.min(1, (cx - r.left) / r.width)); return S.frames[Math.round(p * (S.frames.length - 1))] || nowTs(); }
@@ -158,28 +226,64 @@
   function formatTimeDiff(ts) { var now = nowTs(), diff = ts - now, ad = Math.abs(diff); if (ad < 60) return { text: 'сейчас', cls: 'now' }; var mins = Math.round(ad / 60), hours = Math.floor(mins / 60), rm = mins % 60, text = ''; if (hours > 0) { text = hours + 'ч'; if (rm > 0) text += ' ' + rm + 'м'; } else text = mins + 'м'; return diff < 0 ? { text: '−' + text + ' назад', cls: 'past' } : { text: '+' + text + ' вперёд', cls: 'future' }; }
   function showTimeTooltip(ts, pct) { var d = new Date(ts * 1000), ts2 = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Moscow' }), ds = d.toLocaleDateString('ru', { day: '2-digit', month: 'short', timeZone: 'Europe/Moscow' }), di = formatTimeDiff(ts); timeTooltip.innerHTML = '<div class="tt-time">' + ts2 + '</div><div class="tt-date">' + ds + ' МСК</div><div class="tt-diff ' + di.cls + '">' + di.text + '</div>'; timeTooltip.style.left = pct + '%'; timeTooltip.classList.add('visible'); }
   function hideTimeTooltip() { timeTooltip.classList.remove('visible'); }
-  $('track').addEventListener('pointerdown', function(e) { drag = true; var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX); setTime(ts, true); updHUD(); showTimeTooltip(ts, pct); this.setPointerCapture(e.pointerId); });
-  $('track').addEventListener('pointermove', function(e) { if (drag) { var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX); setTime(ts, true); updHUD(); showTimeTooltip(ts, pct); } });
-  document.addEventListener('pointerup', function() { if (drag) { drag = false; hideTimeTooltip(); buildFrames(); S.failed.clear(); forceRefresh(); } });
+  $('track').addEventListener('pointerdown', function(e) { drag = true; var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX); S.ts = ts; updHUD(); if (S.layer === 'sat') updateSatLayer(); else { S.manualTime = true; schedRender(); } showTimeTooltip(ts, pct); this.setPointerCapture(e.pointerId); });
+  $('track').addEventListener('pointermove', function(e) { if (drag) { var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX); S.ts = ts; updHUD(); if (S.layer === 'sat') updateSatLayer(); else { schedRender(); } showTimeTooltip(ts, pct); } });
+  document.addEventListener('pointerup', function() { if (drag) { drag = false; hideTimeTooltip(); if (S.layer === 'sat') { updateSatLayer(); } else { buildFrames(); S.failed.clear(); forceRefresh(); } } });
   $('track').addEventListener('mousemove', function(e) { if (!drag) showTimeTooltip(tsFromX(e.clientX), pctFromX(e.clientX)); });
   $('track').addEventListener('mouseleave', function() { if (!drag) hideTimeTooltip(); });
 
   function animMs() { return 900 / S.speeds[S.speedI]; }
   function togglePlay() { S.playing ? stopPlay() : startPlay(); }
-  function startPlay() { buildFrames(); S.frameI = 0; S.timer = setInterval(function() { S.frameI = (S.frameI + 1) % S.frames.length; S.ts = S.frames[S.frameI]; S.failed.clear(); updHUD(); schedRender(); }, animMs()); S.playing = true; $('playbtn').innerHTML = '&#x25A0;'; }
+  function startPlay() {
+    if (S.layer === 'sat' && !rvMeta) { toast('Спутник еще не загрузился'); return; }
+    buildFrames(); S.frameI = 0; 
+    S.timer = setInterval(function() {
+      S.frameI = (S.frameI + 1) % S.frames.length;
+      S.ts = S.frames[S.frameI];
+      if (S.layer === 'sat') { updateSatLayer(); }
+      else { S.failed.clear(); schedRender(); }
+      updHUD();
+    }, animMs());
+    S.playing = true; $('playbtn').innerHTML = '&#x25A0;';
+  }
   function stopPlay() { clearInterval(S.timer); S.timer = null; S.playing = false; $('playbtn').innerHTML = '&#x25B6;'; }
   function cycleSpeed() { S.speedI = (S.speedI + 1) % S.speeds.length; $('spd').textContent = S.speeds[S.speedI] + '×'; if (S.playing) { stopPlay(); startPlay(); } }
-  function shiftTs(d) { stopPlay(); var n = Math.round((S.ts + d) / STEP) * STEP; var mn = minTs(), mx = nowTs(); n = Math.max(mn, Math.min(n, mx)); if (n <= mn) toast('⚠️ Максимум ' + HISTORY_MINUTES + ' мин назад'); setTime(n, true); buildFrames(); updHUD(); S.failed.clear(); forceRefresh(); toast('⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })); }
+  function shiftTs(d) {
+    stopPlay();
+    if (S.layer === 'sat' && S.frames.length > 0) {
+      var targetTs = S.ts + d;
+      var closest = S.frames.reduce(function(prev, curr) { return (Math.abs(curr - targetTs) < Math.abs(prev - targetTs) ? curr : prev); });
+      if (closest === S.ts) { toast('⚠️ Достигнут предел истории'); return; }
+      S.ts = closest; updateSatLayer();
+      toast('⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', {hour: '2-digit', minute: '2-digit'}));
+      return;
+    }
+    var n = Math.round((S.ts + d) / STEP) * STEP; var mn = minTs(), mx = nowTs();
+    n = Math.max(mn, Math.min(n, mx)); if (n <= mn) toast('⚠️ Максимум ' + HISTORY_MINUTES + ' мин назад');
+    setTime(n, true); buildFrames(); updHUD(); S.failed.clear(); forceRefresh();
+    toast('⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }));
+  }
   
   function setLayer(newLayer) {
     if (!newLayer || newLayer === S.layer) return;
     S.layer = newLayer;
     document.querySelectorAll('#layers-dropdown .dd-item').forEach(function(item) { item.classList.toggle('active', item.dataset.layer === S.layer); });
-    $('btn-layers-menu').textContent = 'Слои: ' + (S.layer === 'radar' ? 'dBZ' : 'ОЯ');
-    S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
-    S.cache.clear(); S.pending.clear(); S.failed.clear();
+    $('btn-layers-menu').textContent = 'Слои: ' + (S.layer === 'radar' ? 'dBZ' : (S.layer === 'wx' ? 'ОЯ' : 'Спутник'));
+
+    stopPlay();
+    if (S.layer === 'sat') {
+      if (rvSatLayer) { map.removeLayer(rvSatLayer); rvSatLayer = null; }
+      canvas.style.display = 'none';
+      fetchRainViewerSatMeta();
+    } else {
+      if (rvSatLayer) { map.removeLayer(rvSatLayer); rvSatLayer = null; }
+      canvas.style.display = 'block';
+      S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
+      S.cache.clear(); S.pending.clear(); S.failed.clear();
+      buildFrames(); forceRefresh();
+    }
     S.fade.active = true; S.fade.start = performance.now(); S.fade.alpha = 0;
-    buildLegend(); forceRefresh(); hidePopup();
+    buildLegend(); hidePopup();
     if (S.ruler.active) toggleRuler();
   }
 
@@ -194,12 +298,21 @@
   function clearRuler() { S.ruler.points = []; if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline); S.ruler.polyline = null; } if (S.ruler.label) { map.removeLayer(S.ruler.label); S.ruler.label = null; } S.ruler.segmentLabels.forEach(function(l) { map.removeLayer(l); }); S.ruler.segmentLabels = []; S.ruler.markers.forEach(function(m) { map.removeLayer(m); }); S.ruler.markers = []; }
   function rulerFinish(e) { if (!S.ruler.active) return; if (S.ruler.points.length < 2) { toast('Нужно минимум 2 точки'); } else { var total = 0; for (var i = 1; i < S.ruler.points.length; i++) { total += S.ruler.points[i - 1].distanceTo(S.ruler.points[i]); } toast('📏 Длина: ' + (total / 1000).toFixed(1) + ' км'); } toggleRuler(); }
 
-  function buildLegend() { var el = $('lbody'); el.innerHTML = ''; var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; $('ltitle').textContent = title; items.forEach(function(p) { var row = document.createElement('div'); row.className = 'li'; var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); }
+  function buildLegend() { 
+    var el = $('lbody'); el.innerHTML = ''; 
+    if (S.layer === 'sat') {
+      $('ltitle').textContent = 'СПУТНИК (IR)';
+      el.innerHTML = '<div class="li"><div class="lsq" style="background:#fff"></div><span>Очень холодные вершины (Грозы)</span></div><div class="li"><div class="lsq" style="background:#999"></div><span>Умеренные облака</span></div><div class="li"><div class="lsq" style="background:#333"></div><span>Тепло / Земля</span></div>';
+      return;
+    }
+    var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; $('ltitle').textContent = title; 
+    items.forEach(function(p) { var row = document.createElement('div'); row.className = 'li'; var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
+  }
   function toggleLegend() { var lg = $('legend'), btn = $('toggle-legend-btn'); if (S.legendVis) { lg.classList.add('collapsed'); btn.innerHTML = '+'; } else { lg.classList.remove('collapsed'); btn.innerHTML = '−'; } S.legendVis = !S.legendVis; }
   var toastTmr;
-  function toast(m) { var el = $('dbg'); clearTimeout(toastTmr); el.style.color = '#5b8def'; el.textContent = m; toastTmr = setTimeout(function() { el.style.color = ''; doRender(); }, 2500); }
+  function toast(m) { var el = $('dbg'); clearTimeout(toastTmr); el.style.color = '#5b8def'; el.textContent = m; toastTmr = setTimeout(function() { el.style.color = ''; if (S.layer === 'sat') doRender(); else doRender(); }, 2500); }
 
-  setInterval(function() { if (!S.playing && !S.manualTime) { var n = nowTs(); if (n !== S.ts) { S.ts = n; updHUD(); forceRefresh(); toast('Новые данные'); } } buildFrames(); }, 60000);
+  setInterval(function() { if (!S.playing && !S.manualTime) { var n = nowTs(); if (n !== S.ts) { S.ts = n; updHUD(); if (S.layer !== 'sat') forceRefresh(); else updateSatLayer(); toast('Новые данные'); } } if (S.layer !== 'sat') buildFrames(); }, 60000);
 
   var hoverEl = $('hover-indicator'), popupEl = $('pixel-popup'), crosshairEl = $('crosshair'), crosshairLbl = $('crosshair-label');
   var popupVisible = false, crosshairMode = false;
@@ -207,6 +320,7 @@
   function findPalEntry(r, g, b) { var items = getCurrentPaletteItems(), best = null, bd = 1e9; for (var i = 0; i < items.length; i++) { var p = items[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2], d = dr * dr + dg * dg + db * db; if (d < bd) { bd = d; best = p; } } return bd < 3000 ? { label: best.l, v: best.v } : null; }
   
   function getBlockAt(mx, my) { 
+    if (S.layer === 'sat') return null; // Спутник не поддерживает попиксельный клик
     var tiles = visTiles(); 
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], r = tileRect(t.x, t.y); 
@@ -230,16 +344,16 @@
     return null; 
   }
   
-  function updateCrosshair() { if (!crosshairMode) return; var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = 'transparent'; var info = block.info; var txt = '—'; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { txt = Math.round(block.dbz) + ' dBZ | ' + info.label; } else { txt = '≥' + info.v + ' dBZ | ' + info.label; } } else { txt = info.label; } } crosshairLbl.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + block.color + ';border:1px solid #000;vertical-align:middle;margin-right:6px"></span>' + txt; crosshairLbl.style.display = 'block'; var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh; if (ly < 8) ly = cy + 50; crosshairLbl.style.left = lx + 'px'; crosshairLbl.style.top = ly + 'px'; } else { hoverEl.style.display = 'none'; crosshairLbl.innerHTML = '<span style="color:#888">нет данных</span>'; crosshairLbl.style.display = 'block'; crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px'; crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px'; } }
+  function updateCrosshair() { if (!crosshairMode || S.layer === 'sat') return; var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = 'transparent'; var info = block.info; var txt = '—'; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { txt = Math.round(block.dbz) + ' dBZ | ' + info.label; } else { txt = '≥' + info.v + ' dBZ | ' + info.label; } } else { txt = info.label; } } crosshairLbl.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + block.color + ';border:1px solid #000;vertical-align:middle;margin-right:6px"></span>' + txt; crosshairLbl.style.display = 'block'; var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh; if (ly < 8) ly = cy + 50; crosshairLbl.style.left = lx + 'px'; crosshairLbl.style.top = ly + 'px'; } else { hoverEl.style.display = 'none'; crosshairLbl.innerHTML = '<span style="color:#888">нет данных</span>'; crosshairLbl.style.display = 'block'; crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px'; crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px'; } }
   function toggleCrosshair() { crosshairMode = !crosshairMode; var btn = $('btn-crosshair'); if (crosshairMode) { btn.classList.add('on'); crosshairEl.style.display = 'block'; updateCrosshair(); } else { btn.classList.remove('on'); crosshairEl.style.display = 'none'; crosshairLbl.style.display = 'none'; hoverEl.style.display = 'none'; } if (S.ruler.active) toggleRuler(); }
   function showPopup(block, mx, my) { var info = block.info; var lbl = info ? escHtml(info.label) : '—'; var meta = ''; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info.label; } else { meta = 'Слой: <b>Отражаемость</b><br>Порог: ≥' + info.v + ' dBZ<br>Категория: ' + info.label; } } else { meta = 'Слой: <b>Явления</b><br>' + info.label; } } else { meta = 'Нет данных'; } popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color + '"></div><div class="popup-label">' + lbl + '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>'; popupEl.style.display = 'block'; popupEl.classList.remove('popup-in'); void popupEl.offsetWidth; popupEl.classList.add('popup-in'); var px2 = mx + 16, py2 = my - 55; if (px2 + 230 > innerWidth - 8) px2 = mx - 246; if (py2 < 8) py2 = 8; if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118; popupEl.style.left = px2 + 'px'; popupEl.style.top = py2 + 'px'; popupVisible = true; }
   function hidePopup() { popupEl.style.display = 'none'; popupVisible = false; }
-  map.on('mousemove', function(e) { if (crosshairMode) { requestAnimationFrame(updateCrosshair); return; } var p = e.containerPoint, block = getBlockAt(p.x, p.y); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none'; });
-  map.on('click', function(e) { if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint, block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
+  map.on('mousemove', function(e) { if (crosshairMode) { requestAnimationFrame(updateCrosshair); return; } if (S.layer === 'sat') return; var p = e.containerPoint, block = getBlockAt(p.x, p.y); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none'; });
+  map.on('click', function(e) { if (S.ruler.active || S.layer === 'sat') return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint, block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
 
   var modal = $('palette-modal'), modalClose = $('modal-close'), modalTabs = document.querySelectorAll('.modal-tabs button'), paletteListContainer = $('palette-list-container'), loadPaletteBtn = $('load-palette-btn'), fileInput = $('file-input'), createPaletteBtn = $('create-palette-btn'), deletePaletteBtn = $('delete-palette-btn'), exportPaletteBtn = $('export-palette-btn'), createForm = $('create-form'), newPalName = $('new-pal-name'), entryVal = $('entry-val'), entryColor = $('entry-color'), entryLabel = $('entry-label'), addEntryBtn = $('add-entry-btn'), entriesList = $('entries-list'), savePaletteBtn = $('save-palette-btn'), cancelCreateBtn = $('cancel-create-btn');
   var currentLayerForModal = 'radar'; var tempEntries = []; var editingIndex = -1; var editingEntryIndex = -1;
-  function openModal() { modal.classList.add('open'); currentLayerForModal = S.layer; modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
+  function openModal() { modal.classList.add('open'); currentLayerForModal = (S.layer === 'sat' ? 'radar' : S.layer); modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
   function closeModal() { modal.classList.remove('open'); closeForm(); }
   function renderPaletteList() { var list = palettes[currentLayerForModal].list; var activeIdx = palettes[currentLayerForModal].activeIdx; var html = ''; list.forEach(function(p, idx) { var activeClass = idx === activeIdx ? 'active' : ''; var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : ''; var editBtn = p.builtin ? '' : '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>'; html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' + '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' + '<div>' + editBtn + (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') + '</div></div>'; }); paletteListContainer.innerHTML = html; paletteListContainer.querySelectorAll('.palette-item').forEach(function(el) { el.addEventListener('click', function(e) { if (e.target.classList.contains('del') || e.target.classList.contains('edit-btn')) return; var idx = parseInt(this.dataset.idx); palettes[currentLayerForModal].activeIdx = idx; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } }); }); paletteListContainer.querySelectorAll('.edit-btn').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); startEditingPalette(idx); }); }); paletteListContainer.querySelectorAll('.del').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); var list2 = palettes[currentLayerForModal].list; if (list2[idx].builtin) return; if (confirm('Удалить палитру "' + list2[idx].name + '"?')) { list2.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx = list2.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } }); }); }
   function startEditingPalette(idx) { var list = palettes[currentLayerForModal].list; if (idx < 0 || idx >= list.length) return; var pal = list[idx]; if (pal.builtin) { toast('Встроенную палитру нельзя редактировать'); return; } editingIndex = idx; newPalName.value = pal.name; tempEntries = pal.items.map(function(item) { return { val: item.v, color: '#' + item.r.map(function(c) { return c.toString(16).padStart(2, '0'); }).join(''), label: item.l, r: { r: item.r[0], g: item.r[1], b: item.r[2] } }; }); editingEntryIndex = -1; renderEntries(); createForm.classList.add('open'); savePaletteBtn.textContent = '💾 Обновить'; toast('Редактирование палитры "' + pal.name + '"'); }
@@ -247,7 +361,7 @@
   function renderEntries() { entriesList.innerHTML = ''; tempEntries.forEach(function(e, idx) { var div = document.createElement('div'); div.className = 'entry'; if (editingEntryIndex === idx) { div.innerHTML = `<input type="number" class="edit-val" value="${e.val}" step="1" style="width:50px;background:#121212;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;"><input type="color" class="edit-color" value="${e.color}" style="width:28px;height:28px;padding:0;border:0;background:transparent;cursor:pointer;"><input type="text" class="edit-label" value="${escHtml(e.label)}" style="flex:1;background:#121212;border:1px solid #333;border-radius:4px;color:#fff;padding:2px;"><button class="save-entry-btn" data-idx="${idx}" style="background:#4a7fe8;border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-weight:600;">✓</button>`; } else { div.innerHTML = `<span><span class="color-swatch" style="background:${e.color}"></span> ${e.val} → ${escHtml(e.label)}</span><div><button class="edit-entry-btn" data-idx="${idx}" style="background:none;border:none;color:#888;cursor:pointer;font-size:12px;margin-right:4px;">✎</button><button class="del-entry" data-idx="${idx}" style="background:none;border:none;color:#ff5252;cursor:pointer;font-size:12px;">✕</button></div>`; } entriesList.appendChild(div); }); entriesList.querySelectorAll('.save-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); var entryDiv = this.closest('.entry'); var valInput = entryDiv.querySelector('.edit-val'); var colorInput = entryDiv.querySelector('.edit-color'); var labelInput = entryDiv.querySelector('.edit-label'); var newVal = parseFloat(valInput.value); if (isNaN(newVal)) { toast('Введите число'); return; } var newColor = colorInput.value; var newLabel = labelInput.value.trim() || 'без метки'; var rgb = hexToRgb(newColor); if (!rgb) { toast('Неверный цвет'); return; } tempEntries[idx] = { val: newVal, color: newColor, label: newLabel, r: rgb }; editingEntryIndex = -1; renderEntries(); }); }); entriesList.querySelectorAll('.edit-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); editingEntryIndex = idx; renderEntries(); }); }); entriesList.querySelectorAll('.del-entry').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); tempEntries.splice(idx, 1); if (editingEntryIndex === idx) editingEntryIndex = -1; else if (editingEntryIndex > idx) editingEntryIndex--; renderEntries(); }); }); }
   function addEntry() { var v = parseFloat(entryVal.value); if (isNaN(v)) { toast('Введите число'); return; } var color = entryColor.value; var label = entryLabel.value.trim() || 'без метки'; var rgb = hexToRgb(color); if (!rgb) { toast('Неверный цвет'); return; } tempEntries.push({ val: v, color: color, label: label, r: rgb }); renderEntries(); entryVal.value = ''; entryLabel.value = ''; var maxVal = tempEntries.reduce(function(mx, e) { return Math.max(mx, e.val); }, 0); entryVal.value = (maxVal + 5); }
   function hexToRgb(hex) { var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null; }
-  function savePalette() { var name = newPalName.value.trim() || 'Без названия'; if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; } var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; }); var items = sorted.map(function(e) { return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label }; }); if (editingIndex >= 0) { var list = palettes[currentLayerForModal].list; if (editingIndex >= list.length) { toast('Ошибка: палитра не найдена'); return; } if (list[editingIndex].builtin) { toast('Нельзя редактировать встроенную палитру'); return; } list[editingIndex].name = name; list[editingIndex].items = items; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer && palettes[currentLayerForModal].activeIdx === editingIndex) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" обновлена'); closeForm(); } else { var newPal = { name: name, items: items, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" сохранена'); closeForm(); } }
+  function savePalette() { var name = newPalName.value.trim() || 'Без названия'; if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; } var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; }); var items = sorted.map(function(e) { return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label }; }); if (editingIndex >= 0) { var list = palettes[currentLayerForModal].list; if (editingIndex >= list.length) { toast('Ошибка: палитра не найдена'); return; } if (list[editingIndex].builtin) { toast('Нельзя редактировать встроенную палитру'); return; } list[editingIndex].name = name; list[editingIndex].items = items; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" обновлена'); closeForm(); } else { var newPal = { name: name, items: items, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" сохранена'); closeForm(); } }
   function exportPalette() { var layer = currentLayerForModal || S.layer; var list = palettes[layer].list; var idx = palettes[layer].activeIdx; if (!list || list.length === 0 || idx >= list.length) { toast('Нет палитры для экспорта'); return; } var pal = list[idx]; var content = generatePalFile(pal.items, pal.name, layer); var blob = new Blob([content], { type: 'text/plain;charset=utf-8' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = (pal.name || 'palette') + '.pal'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('Палитра "' + pal.name + '" экспортирована'); }
   function generatePalFile(items, name, layer) { var sorted = items.slice().sort(function(a, b) { return a.v - b.v; }); var lines = []; lines.push('Product: ' + (layer === 'radar' ? 'BR' : 'WX')); lines.push('Units: dBZ'); lines.push('Scale: 1'); lines.push('Offset: 0'); lines.push('Step: 5'); lines.push('RF: 0 0 0'); lines.push(''); for (var i = 0; i < sorted.length; i++) { var p = sorted[i]; var r = p.r[0], g = p.r[1], b = p.r[2]; lines.push('Color: ' + p.v + ' ' + r + ' ' + g + ' ' + b); } return lines.join('\n'); }
   function loadPaletteFromFile(file) { var reader = new FileReader(); reader.onload = function(e) { try { var content = e.target.result; var data = parsePaletteFile(content); if (data) { var name = file.name.replace(/\.[^.]+$/, '') || 'Загруженная'; var newPal = { name: name, items: data, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра загружена'); } else { toast('Ошибка парсинга файла'); } } catch (err) { toast('Ошибка: ' + err.message); } }; reader.readAsText(file); }
@@ -268,7 +382,7 @@
 
   var opacitySlider = $('opacity-slider');
   var opacityVal = $('opacity-val');
-  if (opacitySlider) { opacitySlider.addEventListener('input', function() { var val = parseInt(this.value); canvas.style.opacity = val / 100; opacityVal.textContent = val + '%'; }); }
+  if (opacitySlider) { opacitySlider.addEventListener('input', function() { var val = parseInt(this.value); if (S.layer === 'sat' && rvSatLayer) { rvSatLayer.setOpacity(val / 100); } else { canvas.style.opacity = val / 100; } opacityVal.textContent = val + '%'; }); }
 
   var helpModal = $('help-modal');
   var helpClose = $('help-close');
@@ -306,5 +420,5 @@
   window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
 
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
-  console.log('2×2 Радар загружен. 1x1 км интерполяция активна.');
+  console.log('2×2 Радар загружен. 1x1 км интерполяция и EUMETSAT активны.');
 })();
