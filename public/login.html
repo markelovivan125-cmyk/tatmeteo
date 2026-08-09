@@ -4,84 +4,65 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>2х2 | Вход</title>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    :root {
-      --neon-green: #00ff9d;
-      --neon-green-dark: #00cc7a;
-      --bg-dark: #050f0a;
-      --glass-border: rgba(0, 255, 157, 0.3);
-    }
     body {
-      margin: 0; padding: 0; background: var(--bg-dark); color: #e0ffe0;
-      font-family: 'Rajdhani', sans-serif; height: 100vh;
+      margin: 0; padding: 0; background: #121212; color: #e0e0e0;
+      font-family: 'Inter', sans-serif; height: 100vh;
       display: flex; align-items: center; justify-content: center;
     }
     .auth-box {
-      background: rgba(10, 30, 18, 0.9); border: 1px solid var(--neon-green);
-      border-radius: 12px; padding: 40px; width: 100%; max-width: 380px;
-      text-align: center; box-shadow: 0 0 60px rgba(0, 255, 157, 0.15);
-      position: relative; overflow: hidden;
+      background: #1e1e1e; border: 1px solid #333;
+      border-radius: 8px; padding: 30px; width: 100%; max-width: 360px;
+      text-align: center;
     }
-    .auth-box::before {
-      content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 2px;
-      background: linear-gradient(90deg, transparent, var(--neon-green), transparent);
-      animation: authScan 3s infinite linear;
-    }
-    @keyframes authScan { 0% { left: -100%; } 100% { left: 100%; } }
     .auth-logo {
-      font-family: 'Orbitron', monospace; font-size: 36px; font-weight: 900;
-      color: var(--neon-green); text-shadow: 0 0 15px var(--neon-green);
-      margin-bottom: 5px;
+      font-size: 28px; font-weight: 700; color: #ffffff; margin-bottom: 5px;
     }
     .auth-subtitle {
-      font-family: 'Orbitron', monospace; font-size: 11px; letter-spacing: 3px;
-      color: rgba(150, 255, 200, 0.6); margin-bottom: 30px;
+      font-size: 12px; letter-spacing: 1px;
+      color: #888; margin-bottom: 25px; text-transform: uppercase;
     }
     .auth-form input {
-      width: 100%; box-sizing: border-box; background: rgba(0, 20, 10, 0.6);
-      border: 1px solid var(--glass-border); color: #e0ffe0;
-      padding: 12px 15px; border-radius: 6px; font-size: 16px;
+      width: 100%; box-sizing: border-box; background: #2a2a2a;
+      border: 1px solid #444; color: #ffffff;
+      padding: 12px 15px; border-radius: 6px; font-size: 15px;
       margin-bottom: 15px; outline: none; transition: 0.2s;
     }
-    .auth-form input::placeholder { color: rgba(150, 255, 200, 0.4); }
     .auth-form input:focus {
-      border-color: var(--neon-green); box-shadow: 0 0 15px rgba(0, 255, 157, 0.2);
+      border-color: #4a7fe8;
     }
     .auth-captcha-box { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
     .auth-captcha-img {
-      flex: 1; height: 50px; background: #051a0e; border: 1px solid var(--glass-border);
+      flex: 1; height: 48px; background: #2a2a2a; border: 1px solid #444;
       border-radius: 6px; cursor: pointer; display: flex; align-items: center;
       justify-content: center; overflow: hidden;
     }
     .auth-captcha-img svg { width: 100%; height: 100%; }
     .auth-captcha-box input {
-      width: 100px; margin-bottom: 0; text-align: center; text-transform: uppercase;
-      letter-spacing: 2px; font-weight: 700; color: var(--neon-green);
+      width: 90px; margin-bottom: 0; text-align: center; text-transform: uppercase;
+      font-weight: 700; color: #ffffff;
     }
     .auth-btn {
-      width: 100%; padding: 14px; background: linear-gradient(45deg, var(--neon-green-dark), var(--neon-green));
-      color: #001f0f; border: 0; border-radius: 6px; font-family: 'Orbitron', monospace;
-      font-weight: 700; font-size: 14px; letter-spacing: 2px; cursor: pointer; transition: 0.3s;
-      box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
+      width: 100%; padding: 12px; background: #4a7fe8; color: #ffffff;
+      border: 0; border-radius: 6px; font-weight: 600; font-size: 15px;
+      cursor: pointer; transition: 0.2s;
     }
-    .auth-btn:hover {
-      transform: translateY(-2px); box-shadow: 0 5px 30px rgba(0, 255, 157, 0.6);
-    }
-    .auth-error { color: #ff4d6d; font-size: 13px; margin-top: 15px; display: none; }
+    .auth-btn:hover { background: #3a6fd8; }
+    .auth-error { color: #ff5252; font-size: 13px; margin-top: 15px; display: none; }
   </style>
 </head>
 <body>
   <div class="auth-box">
-    <div class="auth-logo">2×2</div>
-    <div class="auth-subtitle">ДОСТУП К СИСТЕМЕ</div>
+    <div class="auth-logo">2х2 | РАДАР</div>
+    <div class="auth-subtitle">Вход в систему</div>
     <form id="auth-form" class="auth-form">
-      <input type="password" id="pass" placeholder="Секретный пароль" required autocomplete="off">
+      <input type="password" id="pass" placeholder="Введите пароль" required autocomplete="off">
       <div class="auth-captcha-box">
         <div id="captcha-img" class="auth-captcha-img" title="Обновить код"></div>
         <input type="text" id="captcha" placeholder="Код" required maxlength="5" autocomplete="off">
       </div>
-      <button type="submit" class="auth-btn">ВОЙТИ В СИСТЕМУ</button>
+      <button type="submit" class="auth-btn">ВОЙТИ</button>
       <div id="err" class="auth-error"></div>
     </form>
   </div>
@@ -120,7 +101,6 @@
         const data = await res.json();
 
         if (data.success) {
-          // Успех! Идем на главную, привратник нас пропустит
           window.location.href = '/';
         } else {
           errBox.textContent = data.error || 'Ошибка авторизации';
@@ -132,7 +112,7 @@
         errBox.style.display = 'block';
         loadCaptcha();
       } finally {
-        btn.textContent = 'ВОЙТИ В СИСТЕМУ';
+        btn.textContent = 'ВОЙТИ';
         btn.disabled = false;
       }
     });
