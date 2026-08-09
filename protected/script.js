@@ -6,7 +6,7 @@
   window.closePanel = function(id) { var el = $(id); if (el) { el.style.display = 'none'; hiddenPanels[id] = true; } var rb = $('restore-' + id); if (rb) rb.style.display = 'block'; };
   window.restorePanel = function(id) { var el = $(id); if (el) { var flexPanels = { ctrl: 1, tl: 1 }; el.style.display = flexPanels[id] ? 'flex' : 'block'; hiddenPanels[id] = false; } var rb = $('restore-' + id); if (rb) rb.style.display = 'none'; };
 
-  var SRC = 'https://rainradar.ru/composite', FZ = 5, MDBZ = -30, DELAY = 600, STEP = 600;
+  var SRC = 'https://rainradar.ru/composite', FZ = 5, MDBZ = 5, DELAY = 600, STEP = 600;
   var HISTORY_MINUTES = 190, MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
   var BASE_RES_KM = 2;
 
@@ -23,11 +23,7 @@
     { v: 20, r: [0, 0, 205], l: '20 dBZ' },
     { v: 15, r: [0, 76, 254], l: '15 dBZ' },
     { v: 10, r: [0, 168, 254], l: '10 dBZ' },
-    { v: 5, r: [83, 254, 56], l: '5 dBZ' },
-    { v: 0, r: [205, 254, 151], l: '0 dBZ' },
-    { v: -5, r: [170, 207, 234], l: '-5 dBZ' },
-    { v: -10, r: [165, 165, 165], l: '-10 dBZ' },
-    { v: -30, r: [217, 217, 217], l: '-30 dBZ' }
+    { v: 5, r: [83, 254, 56], l: '5 dBZ' }
   ];
 
   var BUILTIN_WX = [
@@ -49,8 +45,8 @@
     { v: 16, r: [53, 146, 103], l: 'Осадки слабые' },
     { v: 13, r: [88, 249, 174], l: 'Морось' },
     { v: 9, r: [129, 204, 223], l: 'Легкая морось' },
-    { v: 0.5, r: [145, 145, 145], l: 'Облака' },
-    { v: 0, r: [107, 107, 107], l: 'Нет явления' }
+    { v: 6, r: [145, 145, 145], l: 'Облака' },
+    { v: 5, r: [107, 107, 107], l: 'Нет явления' }
   ];
 
   var S = {
@@ -79,10 +75,25 @@
 
   function loadPalettesFromStorage() {
     try {
-      var r = localStorage.getItem('radarPalettes'), w = localStorage.getItem('wxPalettes');
-      if (r) { var parsedR = JSON.parse(r); if (Array.isArray(parsedR) && parsedR.length > 0) { palettes.radar.list = parsedR; if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0; } else { initDefaultPalettes('radar'); } } else { initDefaultPalettes('radar'); }
-      if (w) { var parsedW = JSON.parse(w); if (Array.isArray(parsedW) && parsedW.length > 0) { palettes.wx.list = parsedW; if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0; } else { initDefaultPalettes('wx'); } } else { initDefaultPalettes('wx'); }
+      var r = localStorage.getItem('radarPalettes');
+      if (r) {
+        var parsedR = JSON.parse(r);
+        if (Array.isArray(parsedR) && parsedR.length > 0) {
+          var customR = parsedR.filter(function(p) { return !p.builtin; });
+          palettes.radar.list = [{ name: 'Стандартная (радар)', items: BUILTIN_RADAR, builtin: true }].concat(customR);
+        } else { initDefaultPalettes('radar'); }
+      } else { initDefaultPalettes('radar'); }
+
+      var w = localStorage.getItem('wxPalettes');
+      if (w) {
+        var parsedW = JSON.parse(w);
+        if (Array.isArray(parsedW) && parsedW.length > 0) {
+          var customW = parsedW.filter(function(p) { return !p.builtin; });
+          palettes.wx.list = [{ name: 'Стандартная (явления)', items: BUILTIN_WX, builtin: true }].concat(customW);
+        } else { initDefaultPalettes('wx'); }
+      } else { initDefaultPalettes('wx'); }
     } catch (e) { initDefaultPalettes('radar'); initDefaultPalettes('wx'); }
+
     if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0;
     if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0;
   }
