@@ -220,6 +220,9 @@
     </div>
   </div>
 
+  <!-- СКРЫТАЯ КНОПКА ДЛЯ СОВМЕСТИМОСТИ С script.js -->
+  <button id="splash-enter" style="display:none;"></button>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     // === ЛОГИКА АВТОРИЗАЦИИ И КАПЧИ ===
@@ -234,6 +237,14 @@
       } catch (e) { console.error('Ошибка загрузки капчи:', e); }
     }
 
+    // Функция запуска карты (обманываем script.js)
+    function triggerMapStart() {
+      var splashBtn = document.getElementById('splash-enter');
+      if (splashBtn) splashBtn.click(); // Имитируем нажатие, если script.js этого ждал
+      // Отправляем событие изменения размера окна, чтобы Leaflet перерисовал карту
+      setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 300);
+    }
+
     async function checkAuth() {
       try {
         const res = await fetch('/api/me');
@@ -241,8 +252,7 @@
         if (data.auth) {
           document.getElementById('auth-overlay').classList.add('hidden');
           startHeartbeat();
-          // ЗАСТАВЛЯЕМ КАРТУ ЗАГРУЗИТЬСЯ
-          setTimeout(() => { if (typeof map !== 'undefined') map.invalidateSize(); }, 300);
+          triggerMapStart(); // Запускаем карту
         } else {
           document.getElementById('auth-overlay').classList.remove('hidden');
           loadCaptcha();
@@ -281,8 +291,7 @@
         if (data.success) {
           document.getElementById('auth-overlay').classList.add('hidden');
           startHeartbeat();
-          // ЗАСТАВЛЯЕМ КАРТУ ЗАГРУЗИТЬСЯ ПОСЛЕ ВХОДА
-          setTimeout(() => { if (typeof map !== 'undefined') map.invalidateSize(); }, 300);
+          triggerMapStart(); // Запускаем карту после успешного входа
         } else {
           errBox.textContent = data.error || 'Ошибка авторизации';
           errBox.style.display = 'block';
