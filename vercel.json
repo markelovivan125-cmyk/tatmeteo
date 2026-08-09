@@ -9,7 +9,6 @@
     { "source": "/api/me", "destination": "/api/mydsugfusyfjhdsfbe" },
     { "source": "/api/admin", "destination": "/api/adminAEYWTF" },
     { "source": "/api/captcha", "destination": "/api/captchdgjkjsngjksvna" },
-    { "source": "/api/lightning", "destination": "/api/lightning" },
     { "source": "/login.html", "destination": "/login.html" },
     { "source": "/admin.html", "destination": "/admin.html" },
     { "source": "/(.*)", "destination": "/api/adskfjsiguojifnjkserve?path=$1" }
