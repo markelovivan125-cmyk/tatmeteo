@@ -11,12 +11,22 @@
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple-system, sans-serif; color: var(--text); overflow: hidden; -webkit-font-smoothing: antialiased; }
-#map { position: fixed; inset: 0; z-index: 0; }
+
+/* Убрали z-index у #map, чтобы внутренние слои Leaflet могли перекрывать #radar */
+#map { position: fixed; inset: 0; }
 #radar { position: fixed; inset: 0; z-index: 350; pointer-events: none; image-rendering: pixelated; }
+
+/* Жестко задаем z-index для слоев Leaflet, чтобы линейка была поверх радара */
 .leaflet-container { background: var(--bg) !important; }
+.leaflet-tile-pane { z-index: 200 !important; }
+.leaflet-overlay-pane { z-index: 400 !important; } /* Линейка тут */
+.leaflet-shadow-pane { z-index: 450 !important; }
+.leaflet-marker-pane { z-index: 600 !important; } /* Маркеры тут */
+.leaflet-popup-pane { z-index: 700 !important; }
+.leaflet-control-pane { z-index: 800 !important; }
+
 .leaflet-control-attribution { display: none !important; }
 .leaflet-control-scale { background: var(--glass-bg) !important; backdrop-filter: blur(12px); border: 1px solid var(--glass-border) !important; color: var(--text-dim) !important; border-radius: 8px; padding: 4px 10px; font-size: 10px; box-shadow: var(--shadow); }
-.leaflet-overlay-pane, .leaflet-marker-pane { z-index: 500 !important; }
 
 .panel, .restore-btn, #pixel-popup, #crosshair-label, #time-tooltip {
   position: fixed; background: var(--glass-bg); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid var(--glass-border); box-shadow: var(--shadow); border-radius: 16px; z-index: 1000;
@@ -39,8 +49,9 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 .dd-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
 .dd-item.active { background: var(--accent-glow); color: var(--text); }
 
-#smooth-control, #opacity-control { display: none; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(255, 255, 255, 0.03); border-radius: 10px; border: 1px solid var(--glass-border); }
-#smooth-control.active, #opacity-control.active { display: flex; }
+#smooth-control { display: none; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(255, 255, 255, 0.03); border-radius: 10px; border: 1px solid var(--glass-border); }
+#smooth-control.active { display: flex; }
+#opacity-control { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(255, 255, 255, 0.03); border-radius: 10px; border: 1px solid var(--glass-border); }
 #smooth-control label, #opacity-control label { font-size: 11px; color: var(--text-dim); font-weight: 600; }
 #smooth-control input[type="range"], #opacity-control input[type="range"] { width: 60px; height: 4px; -webkit-appearance: none; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; }
 #smooth-control input[type="range"]::-webkit-slider-thumb, #opacity-control input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer; }
