@@ -15,6 +15,7 @@
   <div id="map"></div>
   <canvas id="radar"></canvas>
 
+  <!-- Панель управления -->
   <div class="panel" id="ctrl">
     <div id="layers-wrapper">
       <button class="btn on" id="btn-layers-menu">Слои: dBZ</button>
@@ -49,6 +50,7 @@
     </div>
   </div>
 
+  <!-- Легенда -->
   <div class="panel" id="legend">
     <div id="legend-header">
       <h3 id="ltitle">ОТРАЖАЕМОСТЬ dBZ</h3>
@@ -58,6 +60,7 @@
   </div>
   <button class="restore-btn" id="restore-legend" onclick="restorePanel('legend')">Легенда</button>
 
+  <!-- Таймлайн -->
   <div class="panel" id="tl">
     <button id="playbtn">▶</button>
     <div id="track">
@@ -70,6 +73,7 @@
   </div>
   <button class="restore-btn" id="restore-tl" onclick="restorePanel('tl')">Таймлайн</button>
 
+  <!-- Индикаторы -->
   <div id="pulse"></div>
   <div id="dbg"></div>
   <div id="hover-indicator"></div>
@@ -77,6 +81,7 @@
   <div id="crosshair"><div class="ch-h"></div><div class="ch-v"></div><div class="ch-dot"></div></div>
   <div id="crosshair-label"></div>
 
+  <!-- Модальное окно управления палитрами -->
   <div id="palette-modal">
     <div class="modal-content">
       <h2><span>🎨 Управление палитрами</span><button class="modal-close" id="modal-close">&times;</button></h2>
@@ -107,6 +112,7 @@
     </div>
   </div>
 
+  <!-- Модальное окно справки -->
   <div id="help-modal">
     <div class="modal-content">
       <h2><span>📘 Справка</span><button class="modal-close" id="help-close">&times;</button></h2>
@@ -114,9 +120,18 @@
     </div>
   </div>
 
+  <!-- Скрипты -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
+    // Проверка авторизации (на случай истечения сессии)
+    fetch('/api/me', { cache: 'no-store' }).then(r => r.json()).then(d => {
+      if (!d.auth) window.location.href = '/login.html';
+    }).catch(() => window.location.href = '/login.html');
+
+    // Пульс (Heartbeat) - каждые 15 секунд сообщаем серверу, что мы еще онлайн
+    setInterval(() => { 
+      fetch('/api/auth?action=heartbeat', { method: 'POST', cache: 'no-store' }).catch(()=>{}); 
+    }, 15000);
   </script>
   <script src="script.js"></script>
 </body>
