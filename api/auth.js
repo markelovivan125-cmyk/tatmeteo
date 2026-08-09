@@ -23,15 +23,13 @@ export default async function handler(req, res) {
     const { password, captchaId, captchaCode } = body;
 
     if (action === 'login') {
-      // 1. Проверка капчи
       if (!captchaId || !captchaCode) return res.json({ success: false, error: 'Введите код с картинки' });
       const realCaptcha = await redis.get(`captcha:${captchaId}`);
-      await redis.del(`captcha:${captchaId}`); // Удаляем использованную капчу
+      await redis.del(`captcha:${captchaId}`);
       if (!realCaptcha || realCaptcha !== captchaCode.toLowerCase()) {
         return res.json({ success: false, error: 'Неверный код с картинки' });
       }
 
-      // 2. Защита от перебора (Брутфорса)
       const attempts = await redis.get(`attempts:${userIp}`);
       if (attempts && parseInt(attempts) >= 5) {
         return res.status(429).json({ success: false, error: '🚫 Слишком много попыток. IP заблокирован на 15 минут.' });
@@ -42,11 +40,10 @@ export default async function handler(req, res) {
       const exists = await redis.sismember('passwords', password);
       if (exists !== 1) {
         await redis.incr(`attempts:${userIp}`);
-        await redis.expire(`attempts:${userIp}`, 900); // Блок на 15 мин
+        await redis.expire(`attempts:${userIp}`, 900);
         return res.json({ success: false, error: 'Неверный пароль' });
       }
 
-      // 3. Безопасная привязка устройства (HttpOnly Cookie)
       const cookies = req.headers.cookie || '';
       const devMatch = cookies.match(/device_token=([^;]+)/);
       const currentDeviceToken = devMatch ? devMatch[1] : null;
@@ -58,13 +55,11 @@ export default async function handler(req, res) {
           return res.json({ success: false, error: '🚫 Доступ запрещен! Пароль привязан к другому устройству.' });
         }
       } else {
-        // Привязываем устройство навсегда
         const newDevToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
         await redis.set(`device:${password}`, newDevToken);
         res.setHeader('Set-Cookie', `device_token=${newDevToken}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax`);
       }
 
-      // Сбрасываем счетчик ошибок при успехе
       await redis.del(`attempts:${userIp}`);
 
       const sid = Math.random().toString(36).slice(2);
