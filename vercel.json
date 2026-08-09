@@ -1,13 +1,16 @@
 {
   "functions": {
-    "api/serve.js": {
+    "api/adskfjsiguojifnjkserve.js": {
       "includeFiles": "protected/**"
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/api/auth", "destination": "/api/authgrhouhfiesuhghth" },
+    { "source": "/api/me", "destination": "/api/mydsugfusyfjhdsfbe" },
+    { "source": "/api/admin", "destination": "/api/adminAEYWTF" },
+    { "source": "/api/captcha", "destination": "/api/captchdgjkjsngjksvna" },
     { "source": "/login.html", "destination": "/login.html" },
     { "source": "/admin.html", "destination": "/admin.html" },
-    { "source": "/(.*)", "destination": "/api/serve?path=$1" }
+    { "source": "/(.*)", "destination": "/api/adskfjsiguojifnjkserve?path=$1" }
   ]
 }
