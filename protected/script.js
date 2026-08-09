@@ -464,18 +464,29 @@
       var oneHourAgo = now - 3600000; // 1 час в миллисекундах
 
       strikes.forEach(function(strike) {
-        // Формат Blitzortung: [timestamp, lat, lon, ...]
-        var time = strike[0];
-        var lat = strike[1];
-        var lon = strike[2];
+        // Формат Blitzortung может быть [time, lat, lon] или [lat, lon, time]
+        var lat, lon, time;
+        if (strike[0] > 100000) { // Если первый элемент - это timestamp
+          time = strike[0];
+          lat = strike[1];
+          lon = strike[2];
+        } else {
+          lat = strike[0];
+          lon = strike[1];
+          time = strike[2];
+        }
+
+        // Переводим секунды в миллисекунды, если нужно
+        if (time < 10000000000) time *= 1000;
         
-        if (time >= oneHourAgo) {
-          var bounds = getSquareBounds(lat, lon, 1.5); // Квадрат 1.5х1.5 км
+        // Проверяем, что координаты валидны и молния свежая (до 1 часа)
+        if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && time >= oneHourAgo) {
+          var bounds = getSquareBounds(lat, lon, 0.5); // Квадрат 0.5x0.5 км
           L.rectangle(bounds, {
             color: "#ffeb3b", 
             weight: 1,
             fillColor: "#ffeb3b", 
-            fillOpacity: 0.8,
+            fillOpacity: 0.9,
             interactive: false
           }).addTo(lightningLayer);
         }
