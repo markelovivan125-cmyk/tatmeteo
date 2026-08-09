@@ -41,16 +41,19 @@
   S.px = S.pxLevels[S.pxIndex];
   var palettes = { radar: { list: [], activeIdx: 0 }, wx: { list: [], activeIdx: 0 } };
 
-  // Официальный WMS слой EUMETSAT (Инфракрасный канал 10.8 мкм)
-  var eumetsatLayer = L.tileLayer.wms('https://view.eumetsat.int/geoserver/wms', {
-    layers: 'msg_fes:ir108',
-    format: 'image/png',
-    transparent: true,
-    version: '1.3.0',
-    attribution: '© EUMETSAT',
-    opacity: 1.0,
-    tileSize: 256
-  });
+  // Спутник (EUMETSAT)
+  var eumetsatLayer = null;
+  function createEumetsatLayer(opacity) {
+    return L.tileLayer.wms('https://view.eumetsat.int/geoserver/wms', {
+      layers: 'msg_fes:ir108',
+      format: 'image/png',
+      transparent: true,
+      version: '1.3.0',
+      attribution: '© EUMETSAT',
+      opacity: opacity,
+      tileSize: 256
+    });
+  }
 
   function loadPalettesFromStorage() {
     try {
@@ -166,8 +169,9 @@
   function forceRefresh() { S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender(); }
   function doRefresh() { 
     if (S.layer === 'sat') { 
-      if (map.hasLayer(eumetsatLayer)) {
+      if (eumetsatLayer) {
         map.removeLayer(eumetsatLayer);
+        eumetsatLayer = createEumetsatLayer(parseInt($('opacity-slider').value) / 100);
         eumetsatLayer.addTo(map);
       }
       toast('Спутник обновлен'); 
@@ -239,13 +243,15 @@
 
     stopPlay();
     if (S.layer === 'sat') {
-      canvas.style.display = 'none';
+      if (eumetsatLayer) map.removeLayer(eumetsatLayer);
+      eumetsatLayer = createEumetsatLayer(parseInt($('opacity-slider').value) / 100);
       eumetsatLayer.addTo(map);
+      canvas.style.display = 'none';
       $('tl').style.display = 'none';
       $('restore-tl').style.display = 'none';
-      eumetsatLayer.setOpacity(parseInt($('opacity-slider').value) / 100);
+      toast('Загрузка спутника EUMETSAT...');
     } else {
-      if (map.hasLayer(eumetsatLayer)) map.removeLayer(eumetsatLayer);
+      if (eumetsatLayer) { map.removeLayer(eumetsatLayer); eumetsatLayer = null; }
       canvas.style.display = 'block';
       $('tl').style.display = 'flex';
       S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
@@ -352,7 +358,7 @@
 
   var opacitySlider = $('opacity-slider');
   var opacityVal = $('opacity-val');
-  if (opacitySlider) { opacitySlider.addEventListener('input', function() { var val = parseInt(this.value); if (S.layer === 'sat' && map.hasLayer(eumetsatLayer)) { eumetsatLayer.setOpacity(val / 100); } else { canvas.style.opacity = val / 100; } opacityVal.textContent = val + '%'; }); }
+  if (opacitySlider) { opacitySlider.addEventListener('input', function() { var val = parseInt(this.value); if (S.layer === 'sat' && eumetsatLayer) { eumetsatLayer.setOpacity(val / 100); } else { canvas.style.opacity = val / 100; } opacityVal.textContent = val + '%'; }); }
 
   var helpModal = $('help-modal');
   var helpClose = $('help-close');
