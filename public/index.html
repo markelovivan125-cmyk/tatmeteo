@@ -8,11 +8,20 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
   
-  <!-- Стили для экрана авторизации -->
+  <!-- Стили для экрана авторизации (Тёмно-зелёный неон) -->
   <style>
+    :root {
+      --neon-green-auth: #00ff9d;
+      --neon-green-dark: #00cc7a;
+      --auth-bg: rgba(5, 15, 10, 0.98);
+      --auth-box-bg: rgba(10, 30, 18, 0.9);
+      --auth-border: rgba(0, 255, 157, 0.3);
+      --auth-text-dim: rgba(150, 255, 200, 0.6);
+    }
+
     #auth-overlay {
       position: fixed; inset: 0; z-index: 99999;
-      background: rgba(5, 5, 10, 0.98);
+      background: var(--auth-bg);
       backdrop-filter: blur(10px);
       display: flex; align-items: center; justify-content: center;
       animation: authFadeIn 0.5s ease-out;
@@ -21,80 +30,88 @@
     @keyframes authFadeIn { 0% { opacity: 0; } 100% { opacity: 1; } }
 
     .auth-box {
-      background: rgba(15, 15, 26, 0.9);
-      border: 1px solid var(--neon-cyan);
+      background: var(--auth-box-bg);
+      border: 1px solid var(--neon-green-auth);
       border-radius: 12px;
       padding: 40px;
       width: 100%; max-width: 380px;
       text-align: center;
-      box-shadow: 0 0 60px rgba(0, 240, 255, 0.15);
+      box-shadow: 0 0 60px rgba(0, 255, 157, 0.15);
       position: relative;
       overflow: hidden;
     }
     .auth-box::before {
       content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 2px;
-      background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+      background: linear-gradient(90deg, transparent, var(--neon-green-auth), transparent);
       animation: authScan 3s infinite linear;
     }
     @keyframes authScan { 0% { left: -100%; } 100% { left: 100%; } }
 
     .auth-logo {
       font-family: 'Orbitron', monospace; font-size: 36px; font-weight: 900;
-      color: var(--neon-cyan); text-shadow: 0 0 20px var(--neon-cyan);
+      color: var(--neon-green-auth); 
+      text-shadow: 0 0 15px var(--neon-green-auth), 0 0 30px var(--neon-green-dark);
       margin-bottom: 5px;
     }
     .auth-subtitle {
       font-family: 'Orbitron', monospace; font-size: 11px; letter-spacing: 3px;
-      color: var(--text-dim); margin-bottom: 30px; text-transform: uppercase;
+      color: var(--auth-text-dim); margin-bottom: 30px; text-transform: uppercase;
     }
 
     .auth-form input {
       width: 100%; box-sizing: border-box;
-      background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border);
-      color: var(--text); padding: 12px 15px; border-radius: 6px;
+      background: rgba(0, 20, 10, 0.6); 
+      border: 1px solid var(--auth-border);
+      color: #e0ffe0; 
+      padding: 12px 15px; border-radius: 6px;
       font-size: 16px; font-family: 'Rajdhani', sans-serif;
       margin-bottom: 15px; outline: none; transition: 0.2s;
     }
+    .auth-form input::placeholder { color: rgba(150, 255, 200, 0.4); }
     .auth-form input:focus {
-      border-color: var(--neon-cyan);
-      box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+      border-color: var(--neon-green-auth);
+      box-shadow: 0 0 15px rgba(0, 255, 157, 0.2);
+      background: rgba(0, 30, 15, 0.8);
     }
 
     .auth-captcha-box {
       display: flex; gap: 10px; margin-bottom: 20px; align-items: center;
     }
     .auth-captcha-img {
-      flex: 1; height: 50px; background: #1a1a2e; border: 1px solid var(--glass-border);
-      border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      flex: 1; height: 50px; background: #051a0e; 
+      border: 1px solid var(--auth-border);
+      border-radius: 6px; cursor: pointer; display: flex; 
+      align-items: center; justify-content: center;
       overflow: hidden;
     }
     .auth-captcha-img svg { width: 100%; height: 100%; }
     .auth-captcha-box input {
       width: 100px; margin-bottom: 0; text-align: center; text-transform: uppercase;
-      letter-spacing: 2px; font-weight: 700;
+      letter-spacing: 2px; font-weight: 700; color: var(--neon-green-auth);
     }
 
     .auth-btn {
       width: 100%; padding: 14px;
-      background: linear-gradient(45deg, var(--neon-cyan), var(--neon-purple));
-      color: #000; border: 0; border-radius: 6px;
+      background: linear-gradient(45deg, var(--neon-green-dark), var(--neon-green-auth));
+      color: #001f0f; border: 0; border-radius: 6px;
       font-family: 'Orbitron', monospace; font-weight: 700; font-size: 14px;
       letter-spacing: 2px; cursor: pointer; transition: 0.3s;
-      box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+      box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
     }
     .auth-btn:hover {
       transform: translateY(-2px);
-      box-shadow: 0 5px 30px rgba(0, 240, 255, 0.5);
+      box-shadow: 0 5px 30px rgba(0, 255, 157, 0.6);
+      background: linear-gradient(45deg, var(--neon-green-auth), var(--neon-green-dark));
     }
     .auth-btn:active { transform: translateY(0); }
 
     .auth-error {
-      color: var(--neon-pink); font-size: 13px; margin-top: 15px;
+      color: #ff4d6d; font-size: 13px; margin-top: 15px;
       font-family: 'Rajdhani', sans-serif; display: none;
-      text-shadow: 0 0 10px rgba(255, 0, 255, 0.3);
+      text-shadow: 0 0 10px rgba(255, 77, 109, 0.5);
     }
     .auth-footer {
-      margin-top: 25px; font-size: 10px; color: var(--text-dim);
+      margin-top: 25px; font-size: 10px; color: var(--auth-text-dim);
       font-family: 'Orbitron', monospace; letter-spacing: 1px;
     }
   </style>
@@ -148,6 +165,8 @@
       <input type="range" id="opacity-slider" min="0" max="100" value="100" />
       <span id="opacity-val">100%</span>
     </div>
+    <div class="sep"></div>
+    <button class="btn" id="btn-logout" title="Выйти из системы" style="color:#ff4d6d;">⏻ Выход</button>
   </div>
 
   <div class="panel glass" id="legend">
@@ -231,32 +250,6 @@
     </div>
   </div>
 
-  <!-- ЗАСТАВКА -->
-  <div id="splash-screen">
-    <div class="splash-bg"></div>
-    <div class="stars"></div>
-    <div class="noise"></div>
-    <div class="splash-glow"></div>
-    <div class="splash-content">
-      <div class="logo">2×2</div>
-      <div class="subtitle">КИБЕРРАДАР</div>
-      <div class="system-info">CSF | EMSQuad Radar System</div>
-      <div class="scan-line"></div>
-      <div class="loader">
-        <div class="loader-bar"><div class="loader-fill" id="loader-fill"></div></div>
-        <div class="loader-label" id="loader-label">ЗАГРУЗКА СИСТЕМЫ...</div>
-      </div>
-      <div class="boot-lines" id="boot-lines">
-        <div class="boot-line" data-delay="1.5"><span class="status">●</span> Инициализация модулей обработки сигналов...</div>
-        <div class="boot-line" data-delay="2.5"><span class="status">●</span> Калибровка антенной решётки...</div>
-        <div class="boot-line" data-delay="3.5"><span class="status">●</span> Загрузка нейросетевых фильтров...</div>
-        <div class="boot-line" data-delay="4.5"><span class="status">●</span> Проверка целостности данных...</div>
-      </div>
-      <button class="enter-btn" id="splash-enter">ВОЙТИ</button>
-    </div>
-    <div class="version">v.2.4.0 · НЕЙРО-ИНТЕРФЕЙС</div>
-  </div>
-
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     // === ЛОГИКА АВТОРИЗАЦИИ И КАПЧИ ===
@@ -285,7 +278,6 @@
           loadCaptcha();
         }
       } catch (e) {
-        // Если сервер недоступен, показываем окно входа
         document.getElementById('auth-overlay').classList.remove('hidden');
         loadCaptcha();
       }
@@ -338,6 +330,12 @@
         btn.textContent = 'ВОЙТИ В СИСТЕМУ';
         btn.disabled = false;
       }
+    });
+
+    // Кнопка выхода
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+      await fetch('/api/auth?action=logout', { method: 'POST' });
+      window.location.reload();
     });
 
     // Проверяем авторизацию сразу при загрузке страницы
