@@ -194,7 +194,15 @@
   function shiftTs(d) { stopPlay(); var n = Math.round((S.ts + d) / STEP) * STEP; var mn = minTs(), mx = nowTs(); n = Math.max(mn, Math.min(n, mx)); if (n <= mn) toast('⚠️ Максимум ' + HISTORY_MINUTES + ' мин назад'); setTime(n, true); buildFrames(); updHUD(); S.failed.clear(); forceRefresh(); toast('⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })); }
   function toggleLayer() { var newLayer = S.layer === 'radar' ? 'wx' : 'radar'; S.layer = newLayer; $('btn-layer').textContent = S.layer === 'radar' ? 'Отражаемость' : 'ОЯ Явления'; S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); S.fade.active = true; S.fade.start = performance.now(); S.fade.alpha = 0; buildLegend(); forceRefresh(); hidePopup(); if (S.ruler.active) toggleRuler(); }
   function cyclePx() { S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); }
-  function updatePxLabel() { var resKm = (S.px * BASE_RES_KM).toFixed(1); $('pxbtn').textContent = resKm + ' км'; }
+  function updatePxLabel() {
+  var resKm = (S.px * BASE_RES_KM);
+  var label = resKm.toFixed(1) + ' км';
+  if (resKm === 1) label = '1x1 км';
+  if (resKm === 2) label = '2x2 км';
+  if (resKm === 4) label = '4x4 км';
+  if (resKm === 8) label = '8x8 км';
+  $('pxbtn').textContent = label;
+}
   function toggleSmooth() { S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); btn.textContent = 'Сглаживание ✓'; ctrl.classList.add('active'); } else { btn.classList.remove('on'); btn.textContent = 'Сглаживание'; ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); }
 
   // ─── ЛИНЕЙКА ──────────────────────────────────────────────
