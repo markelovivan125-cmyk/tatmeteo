@@ -1,64 +1,32 @@
 (function() {
   'use strict';
-
   var $ = function(id) { return document.getElementById(id); };
 
-  // ─── управление панелями ────────────────────────────────
   var hiddenPanels = {};
-  window.closePanel = function(id) {
-    var el = $(id);
-    if (el) { el.style.display = 'none'; hiddenPanels[id] = true; }
-    var rb = $('restore-' + id);
-    if (rb) rb.style.display = 'block';
-  };
-  window.restorePanel = function(id) {
-    var el = $(id);
-    if (el) {
-      var flexPanels = { ctrl: 1, tl: 1 };
-      el.style.display = flexPanels[id] ? 'flex' : 'block';
-      hiddenPanels[id] = false;
-    }
-    var rb = $('restore-' + id);
-    if (rb) rb.style.display = 'none';
-  };
+  window.closePanel = function(id) { var el = $(id); if (el) { el.style.display = 'none'; hiddenPanels[id] = true; } var rb = $('restore-' + id); if (rb) rb.style.display = 'block'; };
+  window.restorePanel = function(id) { var el = $(id); if (el) { var flexPanels = { ctrl: 1, tl: 1 }; el.style.display = flexPanels[id] ? 'flex' : 'block'; hiddenPanels[id] = false; } var rb = $('restore-' + id); if (rb) rb.style.display = 'none'; };
 
-  // ─── константы и состояние ──────────────────────────────
   var SRC = 'https://rainradar.ru/composite', FZ = 5, MDBZ = 5, DELAY = 600, STEP = 600;
   var HISTORY_MINUTES = 190, MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
   var BASE_RES_KM = 2;
 
   var BUILTIN_RADAR = [
-    { v: 80, r: [255, 0, 255], l: '80+ Экстремальное' },
-    { v: 70, r: [160, 0, 255], l: '70 Очень сильное' },
-    { v: 65, r: [100, 0, 255], l: '65 Град/Шквал' },
-    { v: 55, r: [255, 0, 0], l: '55 Гроза 100%' },
-    { v: 50, r: [255, 80, 80], l: '50 Гроза 70%' },
-    { v: 40, r: [255, 170, 0], l: '40 Гроза 30%' },
-    { v: 35, r: [255, 230, 0], l: '35 Сильный ливень' },
-    { v: 30, r: [0, 255, 100], l: '30 Ливень' },
-    { v: 25, r: [0, 255, 200], l: '25 Слабый ливень' },
-    { v: 20, r: [0, 200, 255], l: '20 Умеренные осадки' },
-    { v: 15, r: [0, 150, 255], l: '15 Слабые осадки' },
-    { v: 6, r: [0, 100, 200], l: '6 Облачность' }
+    { v: 80, r: [255, 0, 255], l: '80+ Экстремальное' }, { v: 70, r: [160, 0, 255], l: '70 Очень сильное' },
+    { v: 65, r: [100, 0, 255], l: '65 Град/Шквал' }, { v: 55, r: [255, 0, 0], l: '55 Гроза 100%' },
+    { v: 50, r: [255, 80, 80], l: '50 Гроза 70%' }, { v: 40, r: [255, 170, 0], l: '40 Гроза 30%' },
+    { v: 35, r: [255, 230, 0], l: '35 Сильный ливень' }, { v: 30, r: [0, 255, 100], l: '30 Ливень' },
+    { v: 25, r: [0, 255, 200], l: '25 Слабый ливень' }, { v: 20, r: [0, 200, 255], l: '20 Умеренные осадки' },
+    { v: 15, r: [0, 150, 255], l: '15 Слабые осадки' }, { v: 6, r: [0, 100, 200], l: '6 Облачность' }
   ];
-
   var BUILTIN_WX = [
-    { v: 95, r: [255, 255, 255], l: 'Смерч' },
-    { v: 90, r: [255, 0, 80], l: 'Шквал сильный' },
-    { v: 85, r: [255, 50, 120], l: 'Шквал умеренный' },
-    { v: 80, r: [255, 100, 160], l: 'Шквал слабый' },
-    { v: 75, r: [255, 0, 255], l: 'Град сильный' },
-    { v: 70, r: [200, 0, 255], l: 'Град умеренный' },
-    { v: 65, r: [150, 0, 255], l: 'Град слабый' },
-    { v: 55, r: [255, 100, 100], l: 'Гроза >90%' },
-    { v: 50, r: [255, 150, 100], l: 'Гроза 71-90%' },
-    { v: 40, r: [255, 200, 100], l: 'Гроза 30-70%' },
-    { v: 35, r: [0, 150, 255], l: 'Ливень сильный' },
-    { v: 30, r: [0, 200, 255], l: 'Ливень умеренный' },
-    { v: 25, r: [0, 255, 255], l: 'Ливень слабый' },
-    { v: 20, r: [100, 255, 150], l: 'Осадки сильные' },
-    { v: 15, r: [150, 255, 100], l: 'Осадки умеренные' },
-    { v: 6, r: [200, 255, 50], l: 'Осадки слабые' },
+    { v: 95, r: [255, 255, 255], l: 'Смерч' }, { v: 90, r: [255, 0, 80], l: 'Шквал сильный' },
+    { v: 85, r: [255, 50, 120], l: 'Шквал умеренный' }, { v: 80, r: [255, 100, 160], l: 'Шквал слабый' },
+    { v: 75, r: [255, 0, 255], l: 'Град сильный' }, { v: 70, r: [200, 0, 255], l: 'Град умеренный' },
+    { v: 65, r: [150, 0, 255], l: 'Град слабый' }, { v: 55, r: [255, 100, 100], l: 'Гроза >90%' },
+    { v: 50, r: [255, 150, 100], l: 'Гроза 71-90%' }, { v: 40, r: [255, 200, 100], l: 'Гроза 30-70%' },
+    { v: 35, r: [0, 150, 255], l: 'Ливень сильный' }, { v: 30, r: [0, 200, 255], l: 'Ливень умеренный' },
+    { v: 25, r: [0, 255, 255], l: 'Ливень слабый' }, { v: 20, r: [100, 255, 150], l: 'Осадки сильные' },
+    { v: 15, r: [150, 255, 100], l: 'Осадки умеренные' }, { v: 6, r: [200, 255, 50], l: 'Осадки слабые' },
     { v: 0, r: [150, 200, 255], l: 'Облака' }
   ];
 
@@ -71,47 +39,30 @@
     ruler: { active: false, points: [], markers: [], polyline: null, label: null, segmentLabels: [] }
   };
   S.px = S.pxLevels[S.pxIndex];
-
   var palettes = { radar: { list: [], activeIdx: 0 }, wx: { list: [], activeIdx: 0 } };
 
-  // ─── палитры: загрузка, сохранение, получение ──────────
   function loadPalettesFromStorage() {
     try {
-      var r = localStorage.getItem('radarPalettes');
-      var w = localStorage.getItem('wxPalettes');
+      var r = localStorage.getItem('radarPalettes'), w = localStorage.getItem('wxPalettes');
       if (r) { var parsedR = JSON.parse(r); if (Array.isArray(parsedR) && parsedR.length > 0) { palettes.radar.list = parsedR; if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0; } else { initDefaultPalettes('radar'); } } else { initDefaultPalettes('radar'); }
       if (w) { var parsedW = JSON.parse(w); if (Array.isArray(parsedW) && parsedW.length > 0) { palettes.wx.list = parsedW; if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0; } else { initDefaultPalettes('wx'); } } else { initDefaultPalettes('wx'); }
     } catch (e) { initDefaultPalettes('radar'); initDefaultPalettes('wx'); }
     if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0;
     if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0;
   }
-  function initDefaultPalettes(layer) {
-    var items = layer === 'radar' ? BUILTIN_RADAR : BUILTIN_WX;
-    var name = layer === 'radar' ? 'Стандартная (радар)' : 'Стандартная (явления)';
-    palettes[layer].list = [{ name: name, items: items, builtin: true }];
-    palettes[layer].activeIdx = 0;
-    savePalettesToStorage(layer);
-  }
+  function initDefaultPalettes(layer) { var items = layer === 'radar' ? BUILTIN_RADAR : BUILTIN_WX; var name = layer === 'radar' ? 'Стандартная (радар)' : 'Стандартная (явления)'; palettes[layer].list = [{ name: name, items: items, builtin: true }]; palettes[layer].activeIdx = 0; savePalettesToStorage(layer); }
   function savePalettesToStorage(layer) { try { localStorage.setItem(layer + 'Palettes', JSON.stringify(palettes[layer].list)); } catch (e) {} }
-  function getCurrentPaletteItems() {
-    var layer = S.layer; var list = palettes[layer].list; var idx = palettes[layer].activeIdx;
-    if (!list || list.length === 0 || idx >= list.length) { initDefaultPalettes(layer); idx = 0; }
-    return list[idx].items;
-  }
+  function getCurrentPaletteItems() { var layer = S.layer; var list = palettes[layer].list; var idx = palettes[layer].activeIdx; if (!list || list.length === 0 || idx >= list.length) { initDefaultPalettes(layer); idx = 0; } return list[idx].items; }
 
-  // ─── таймлайн ─────────────────────────────────────────────
   function nowTs() { return Math.floor((Date.now() / 1000 - DELAY) / STEP) * STEP; }
   function minTs() { return nowTs() - MAX_HISTORY_SEC; }
   S.ts = nowTs();
   function setTime(t, m) { S.ts = Math.max(minTs(), Math.min(t, nowTs())); S.manualTime = !!m; }
 
-  // ─── карта ─────────────────────────────────────────────────
   var map = L.map('map', { center: [57, 55], zoom: 6, minZoom: 3, maxZoom: 10, zoomControl: false, fadeAnimation: false, markerZoomAnimation: false, scrollWheelZoom: true, doubleClickZoom: true, boxZoom: true, touchZoom: true, keyboard: true });
-  
   var darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20, attribution: '© OpenStreetMap, © CARTO' });
   var lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20, attribution: '© OpenStreetMap, © CARTO' });
   darkTileLayer.addTo(map);
-  
   L.control.scale({ position: 'bottomright', metric: true, imperial: false }).addTo(map);
   setTimeout(function() { map.invalidateSize(); }, 500);
 
@@ -119,7 +70,6 @@
   function resizeCanvas() { canvas.width = innerWidth; canvas.height = innerHeight; schedRender(); }
   addEventListener('resize', resizeCanvas); resizeCanvas();
 
-  // ─── гео-преобразования ──────────────────────────────────
   function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * (1 << z)); }
   function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * (1 << z)); }
   function x2lon(x, z) { return x / (1 << z) * 360 - 180; }
@@ -130,150 +80,43 @@
   function CK(x, y) { return makeCK(S.layer, S.ts, S.px, x, y); }
   function getColor(raw) { if (raw < MDBZ) return null; var items = getCurrentPaletteItems(); for (var i = 0; i < items.length; i++) { if (raw >= items[i].v) return items[i].r; } return null; }
 
-  // ─── ИНТЕРПОЛЯЦИЯ 1х1 КМ ──────────────────────────────────
-  // Разбивает пиксели 2х2 км на 1х1 км с вычислением промежуточных значений dBZ
   function interpolateRaw(raw, w, h, scale) {
-    var nw = w * scale, nh = h * scale;
-    var newRaw = new Float32Array(nw * nh);
-    for (var y = 0; y < nh; y++) {
-      for (var x = 0; x < nw; x++) {
-        var gx = x / scale;
-        var gy = y / scale;
-        var x0 = Math.floor(gx);
-        var y0 = Math.floor(gy);
-        var x1 = Math.min(x0 + 1, w - 1);
-        var y1 = Math.min(y0 + 1, h - 1);
-        var tx = gx - x0;
-        var ty = gy - y0;
-
-        var p00 = raw[y0 * w + x0];
-        var p01 = raw[y0 * w + x1];
-        var p10 = raw[y1 * w + x0];
-        var p11 = raw[y1 * w + x1];
-
-        if (p00 < 0 && p01 < 0 && p10 < 0 && p11 < 0) {
-          newRaw[y * nw + x] = -1;
-        } else {
-          var sum = 0, count = 0;
-          if (p00 >= 0) { sum += p00 * (1-tx) * (1-ty); count += (1-tx)*(1-ty); }
-          if (p01 >= 0) { sum += p01 * tx * (1-ty); count += tx*(1-ty); }
-          if (p10 >= 0) { sum += p10 * (1-tx) * ty; count += (1-tx)*ty; }
-          if (p11 >= 0) { sum += p11 * tx * ty; count += tx*ty; }
-          newRaw[y * nw + x] = count > 0 ? sum / count : -1;
-        }
-      }
-    }
+    var nw = w * scale, nh = h * scale; var newRaw = new Float32Array(nw * nh);
+    for (var y = 0; y < nh; y++) { for (var x = 0; x < nw; x++) {
+      var gx = x / scale, gy = y / scale; var x0 = Math.floor(gx), y0 = Math.floor(gy); var x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+      var tx = gx - x0, ty = gy - y0; var p00 = raw[y0 * w + x0], p01 = raw[y0 * w + x1], p10 = raw[y1 * w + x0], p11 = raw[y1 * w + x1];
+      if (p00 < 0 && p01 < 0 && p10 < 0 && p11 < 0) { newRaw[y * nw + x] = -1; } 
+      else { var sum = 0, count = 0; if (p00 >= 0) { sum += p00 * (1-tx) * (1-ty); count += (1-tx)*(1-ty); } if (p01 >= 0) { sum += p01 * tx * (1-ty); count += tx*(1-ty); } if (p10 >= 0) { sum += p10 * (1-tx) * ty; count += (1-tx)*ty; } if (p11 >= 0) { sum += p11 * tx * ty; count += tx*ty; } newRaw[y * nw + x] = count > 0 ? sum / count : -1; }
+    } }
     return { data: newRaw, w: nw, h: nh };
   }
 
-  // ─── сглаживание ──────────────────────────────────────────
   function applySmoothing(raw, w, h, strength) { 
     if (strength === 0) return raw; 
-    var size = strength * 2 + 1; 
-    var half = Math.floor(size / 2); 
-    var result = new Float32Array(raw.length); 
-    var kernel = []; 
-    var sigma = strength * 0.6 + 0.5; 
-    var sum = 0; 
-    for (var i = -half; i <= half; i++) { 
-      for (var j = -half; j <= half; j++) { 
-        var d = Math.sqrt(i * i + j * j); 
-        var val = Math.exp(-(d * d) / (2 * sigma * sigma)); 
-        kernel.push(val); sum += val; 
-      } 
-    } 
+    var size = strength * 2 + 1; var half = Math.floor(size / 2); var result = new Float32Array(raw.length); var kernel = []; var sigma = strength * 0.6 + 0.5; var sum = 0; 
+    for (var i = -half; i <= half; i++) { for (var j = -half; j <= half; j++) { var d = Math.sqrt(i * i + j * j); var val = Math.exp(-(d * d) / (2 * sigma * sigma)); kernel.push(val); sum += val; } } 
     for (var ki = 0; ki < kernel.length; ki++) kernel[ki] /= sum; 
     var kw = size, kh = size; 
-    for (var y = 0; y < h; y++) { 
-      for (var x = 0; x < w; x++) { 
-        var acc = 0, wsum = 0; 
-        for (var ky = -half; ky <= half; ky++) { 
-          for (var kx = -half; kx <= half; kx++) { 
-            var px = x + kx, py = y + ky; 
-            if (px < 0 || px >= w || py < 0 || py >= h) continue; 
-            var idx = py * w + px; 
-            if (raw[idx] >= 0) { 
-              var kidx = (ky + half) * kw + (kx + half); 
-              acc += raw[idx] * kernel[kidx]; wsum += kernel[kidx]; 
-            } 
-          } 
-        } 
-        var idx2 = y * w + x; 
-        result[idx2] = (wsum > 0) ? acc / wsum : -1; 
-      } 
-    } 
+    for (var y = 0; y < h; y++) { for (var x = 0; x < w; x++) { var acc = 0, wsum = 0; for (var ky = -half; ky <= half; ky++) { for (var kx = -half; kx <= half; kx++) { var px = x + kx, py = y + ky; if (px < 0 || px >= w || py < 0 || py >= h) continue; var idx = py * w + px; if (raw[idx] >= 0) { var kidx = (ky + half) * kw + (kx + half); acc += raw[idx] * kernel[kidx]; wsum += kernel[kidx]; } } } var idx2 = y * w + x; result[idx2] = (wsum > 0) ? acc / wsum : -1; } } 
     return result; 
   }
 
-  // ─── обработка тайла ──────────────────────────────────────
   function processTile(img, px, smooth, smoothStrength) {
     var src = document.createElement('canvas'); src.width = src.height = 256; var sc = src.getContext('2d'); sc.drawImage(img, 0, 0);
-    var id = sc.getImageData(0, 0, 256, 256), d = id.data;
-    
-    var w = 256, h = 256;
-    var raw = new Float32Array(w * h);
-    for (var i = 0; i < d.length; i += 4) { 
-      if (d[i + 3] > 0) { 
-        var v = (d[i] + d[i + 1] + d[i + 2]) / 3 | 0; 
-        raw[i / 4] = v; 
-      } else { 
-        raw[i / 4] = -1; 
-      } 
-    }
-
-    // 1. Разбиваем 2х2 км на 1х1 км (если px < 1)
-    var targetRaw = raw;
-    var targetW = w;
-    var targetH = h;
-    if (px < 1) {
-      var scale = 1 / px; // 2 для 1км
-      var interp = interpolateRaw(raw, w, h, scale);
-      targetRaw = interp.data;
-      targetW = interp.w;
-      targetH = interp.h;
-    }
-
-    // 2. Сглаживание
+    var id = sc.getImageData(0, 0, 256, 256), d = id.data; var w = 256, h = 256; var raw = new Float32Array(w * h);
+    for (var i = 0; i < d.length; i += 4) { if (d[i + 3] > 0) { var v = (d[i] + d[i + 1] + d[i + 2]) / 3 | 0; raw[i / 4] = v; } else { raw[i / 4] = -1; } }
+    var targetRaw = raw, targetW = w, targetH = h;
+    if (px < 1) { var scale = 1 / px; var interp = interpolateRaw(raw, w, h, scale); targetRaw = interp.data; targetW = interp.w; targetH = interp.h; }
     var smoothed = targetRaw;
-    if (smooth && smoothStrength > 0) {
-      smoothed = applySmoothing(targetRaw, targetW, targetH, smoothStrength);
-    }
-
-    // 3. Раскрашиваем
-    var out = document.createElement('canvas');
-    out.width = targetW;
-    out.height = targetH;
-    var oc = out.getContext('2d');
-    oc.imageSmoothingEnabled = false;
-
-    var effectivePx = (px < 1) ? 1 : px; // Внутри нового тайла 1 пиксель = 1 ячейка
-    var bw = Math.ceil(targetW / effectivePx);
-    var bh = Math.ceil(targetH / effectivePx);
-
-    for (var py = 0; py < bh; py++) {
-      for (var pxx = 0; pxx < bw; pxx++) {
-        var x0 = pxx * effectivePx;
-        var y0 = py * effectivePx;
-        var x1 = Math.min(x0 + effectivePx, targetW);
-        var y1 = Math.min(y0 + effectivePx, targetH);
-        var sum = 0, n = 0;
-        for (var yy = y0; yy < y1; yy++) {
-          for (var xx = x0; xx < x1; xx++) {
-            var idx = yy * targetW + xx;
-            if (smoothed[idx] >= 0) { sum += smoothed[idx]; n++; }
-          }
-        }
-        if (n > 0) {
-          var avg = Math.round(sum / n);
-          var rgb = getColor(avg);
-          if (rgb) {
-            oc.fillStyle = 'rgb(' + rgb.join(',') + ')';
-            oc.fillRect(x0, y0, x1 - x0, y1 - y0);
-          }
-        }
-      }
-    }
-
+    if (smooth && smoothStrength > 0) { smoothed = applySmoothing(targetRaw, targetW, targetH, smoothStrength); }
+    var out = document.createElement('canvas'); out.width = targetW; out.height = targetH; var oc = out.getContext('2d'); oc.imageSmoothingEnabled = false;
+    var effectivePx = (px < 1) ? 1 : px; var bw = Math.ceil(targetW / effectivePx), bh = Math.ceil(targetH / effectivePx);
+    for (var py = 0; py < bh; py++) { for (var pxx = 0; pxx < bw; pxx++) {
+      var x0 = pxx * effectivePx, y0 = py * effectivePx, x1 = Math.min(x0 + effectivePx, targetW), y1 = Math.min(y0 + effectivePx, targetH);
+      var sum = 0, n = 0;
+      for (var yy = y0; yy < y1; yy++) { for (var xx = x0; xx < x1; xx++) { var idx = yy * targetW + xx; if (smoothed[idx] >= 0) { sum += smoothed[idx]; n++; } } }
+      if (n > 0) { var avg = Math.round(sum / n); var rgb = getColor(avg); if (rgb) { oc.fillStyle = 'rgb(' + rgb.join(',') + ')'; oc.fillRect(x0, y0, x1 - x0, y1 - y0); } }
+    } }
     return { canvas: out, raw: smoothed, px: px, scaled: false };
   }
 
@@ -294,18 +137,10 @@
     renderPend = false; ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
     var alpha = S.fade.active ? S.fade.alpha : 1; var tiles = visTiles(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = false;
-    
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], ck = CK(t.x, t.y), entry = S.cache.get(ck); 
-      if (entry && entry.canvas) { 
-        var r = tileRect(t.x, t.y); 
-        if (r.sw > 0 && r.sh > 0) { 
-          // Тайл уже имеет нужное разрешение (512x512 для 1км), просто рисуем его
-          ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); 
-        } 
-      } else { fetchTile(t.x, t.y); } 
+      if (entry && entry.canvas) { var r = tileRect(t.x, t.y); if (r.sw > 0 && r.sh > 0) { ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); } } else { fetchTile(t.x, t.y); } 
     }
-    
     ctx.globalAlpha = 1;
     if (S.layer === 'wx') { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.beginPath(); for (var gi = 0; gi < tiles.length; gi++) { var gt = tiles[gi], gr = tileRect(gt.x, gt.y); if (gr.sw <= 0 || gr.sh <= 0) continue; var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY; if (bW < 1 || bH < 1) continue; var cols = Math.ceil(256 / S.px); for (var ci = 0; ci <= cols; ci++) { var lx = gr.sx + Math.round(ci * bW) + 0.5; ctx.moveTo(lx, gr.sy); ctx.lineTo(lx, gr.sy + gr.sh); } for (var ri = 0; ri <= cols; ri++) { var ly = gr.sy + Math.round(ri * bH) + 0.5; ctx.moveTo(gr.sx, ly); ctx.lineTo(gr.sx + gr.sw, ly); } } ctx.stroke(); ctx.restore(); }
   }
@@ -335,36 +170,37 @@
   function stopPlay() { clearInterval(S.timer); S.timer = null; S.playing = false; $('playbtn').innerHTML = '&#x25B6;'; }
   function cycleSpeed() { S.speedI = (S.speedI + 1) % S.speeds.length; $('spd').textContent = S.speeds[S.speedI] + '×'; if (S.playing) { stopPlay(); startPlay(); } }
   function shiftTs(d) { stopPlay(); var n = Math.round((S.ts + d) / STEP) * STEP; var mn = minTs(), mx = nowTs(); n = Math.max(mn, Math.min(n, mx)); if (n <= mn) toast('⚠️ Максимум ' + HISTORY_MINUTES + ' мин назад'); setTime(n, true); buildFrames(); updHUD(); S.failed.clear(); forceRefresh(); toast('⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })); }
-  function toggleLayer() { var newLayer = S.layer === 'radar' ? 'wx' : 'radar'; S.layer = newLayer; $('btn-layer').textContent = S.layer === 'radar' ? 'Отражаемость' : 'ОЯ Явления'; S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); S.fade.active = true; S.fade.start = performance.now(); S.fade.alpha = 0; buildLegend(); forceRefresh(); hidePopup(); if (S.ruler.active) toggleRuler(); }
-  function cyclePx() { S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); }
-  function updatePxLabel() {
-    var resKm = (S.px * BASE_RES_KM);
-    var label = resKm.toFixed(1) + ' км';
-    if (resKm === 1) label = '1x1 км';
-    if (resKm === 2) label = '2x2 км';
-    if (resKm === 4) label = '4x4 км';
-    if (resKm === 8) label = '8x8 км';
-    $('pxbtn').textContent = label;
+  
+  function setLayer(newLayer) {
+    if (!newLayer || newLayer === S.layer) return;
+    S.layer = newLayer;
+    document.querySelectorAll('#layers-dropdown .dd-item').forEach(function(item) { item.classList.toggle('active', item.dataset.layer === S.layer); });
+    $('btn-layers-menu').textContent = 'Слои: ' + (S.layer === 'radar' ? 'dBZ' : 'ОЯ');
+    S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
+    S.cache.clear(); S.pending.clear(); S.failed.clear();
+    S.fade.active = true; S.fade.start = performance.now(); S.fade.alpha = 0;
+    buildLegend(); forceRefresh(); hidePopup();
+    if (S.ruler.active) toggleRuler();
   }
+
+  function cyclePx() { S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); }
+  function updatePxLabel() { var resKm = (S.px * BASE_RES_KM); var label = resKm.toFixed(1) + ' км'; if (resKm === 1) label = '1x1 км'; if (resKm === 2) label = '2x2 км'; if (resKm === 4) label = '4x4 км'; if (resKm === 8) label = '8x8 км'; $('pxbtn').textContent = label; }
   function toggleSmooth() { S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); btn.textContent = 'Сглаживание ✓'; ctrl.classList.add('active'); } else { btn.classList.remove('on'); btn.textContent = 'Сглаживание'; ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); }
 
-  // ─── ЛИНЕЙКА ──────────────────────────────────────────────
   function toggleRuler() { S.ruler.active = !S.ruler.active; var btn = $('btn-ruler'); if (S.ruler.active) { btn.classList.add('on'); btn.textContent = '📏 ✓'; toast('Клик — точка, двойной клик — завершить.'); map.on('click', rulerClick); map.on('dblclick', rulerFinish); if (crosshairMode) toggleCrosshair(); } else { btn.classList.remove('on'); btn.textContent = '📏'; map.off('click', rulerClick); map.off('dblclick', rulerFinish); clearRuler(); } }
-  function rulerClick(e) { if (!S.ruler.active) return; var latlng = e.latlng; S.ruler.points.push(latlng); var marker = L.circleMarker(latlng, { radius: 5, color: '#4a7fe8', fillColor: '#fff', fillOpacity: 1, weight: 2, className: 'ruler-marker' }).addTo(map); S.ruler.markers.push(marker); updateRulerLine(); updateRulerLabels(); }
-  function updateRulerLine() { if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline); S.ruler.polyline = null; } if (S.ruler.points.length >= 2) { S.ruler.polyline = L.polyline(S.ruler.points, { color: '#4a7fe8', weight: 2, dashArray: '6 4', opacity: 0.8, className: 'ruler-line' }).addTo(map); } }
+  function rulerClick(e) { if (!S.ruler.active) return; var latlng = e.latlng; S.ruler.points.push(latlng); var marker = L.circleMarker(latlng, { radius: 5, color: '#5b8def', fillColor: '#fff', fillOpacity: 1, weight: 2, className: 'ruler-marker' }).addTo(map); S.ruler.markers.push(marker); updateRulerLine(); updateRulerLabels(); }
+  function updateRulerLine() { if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline); S.ruler.polyline = null; } if (S.ruler.points.length >= 2) { S.ruler.polyline = L.polyline(S.ruler.points, { color: '#5b8def', weight: 2, dashArray: '6 4', opacity: 0.8, className: 'ruler-line' }).addTo(map); } }
   function updateRulerLabels() { S.ruler.segmentLabels.forEach(function(l) { map.removeLayer(l); }); S.ruler.segmentLabels = []; if (S.ruler.label) { map.removeLayer(S.ruler.label); S.ruler.label = null; } if (S.ruler.points.length < 2) return; var totalDist = 0; for (var i = 1; i < S.ruler.points.length; i++) { totalDist += S.ruler.points[i - 1].distanceTo(S.ruler.points[i]); } var distKm = (totalDist / 1000).toFixed(1); var midIdx = Math.floor((S.ruler.points.length - 1) / 2); var midLatLng = S.ruler.points[midIdx]; var labelHtml = '<div class="ruler-label">📏 ' + distKm + ' км</div>'; S.ruler.label = L.marker(midLatLng, { icon: L.divIcon({ className: '', html: labelHtml, iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(map); for (var j = 1; j < S.ruler.points.length; j++) { var p1 = S.ruler.points[j - 1], p2 = S.ruler.points[j]; var segDist = (p1.distanceTo(p2) / 1000).toFixed(1); var midSeg = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2); var segLabel = L.marker(midSeg, { icon: L.divIcon({ className: '', html: '<div class="ruler-segment-label">' + segDist + ' км</div>', iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(map); S.ruler.segmentLabels.push(segLabel); } }
   function clearRuler() { S.ruler.points = []; if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline); S.ruler.polyline = null; } if (S.ruler.label) { map.removeLayer(S.ruler.label); S.ruler.label = null; } S.ruler.segmentLabels.forEach(function(l) { map.removeLayer(l); }); S.ruler.segmentLabels = []; S.ruler.markers.forEach(function(m) { map.removeLayer(m); }); S.ruler.markers = []; }
   function rulerFinish(e) { if (!S.ruler.active) return; if (S.ruler.points.length < 2) { toast('Нужно минимум 2 точки'); } else { var total = 0; for (var i = 1; i < S.ruler.points.length; i++) { total += S.ruler.points[i - 1].distanceTo(S.ruler.points[i]); } toast('📏 Длина: ' + (total / 1000).toFixed(1) + ' км'); } toggleRuler(); }
 
-  // ─── ЛЕГЕНДА ──────────────────────────────────────────────
   function buildLegend() { var el = $('lbody'); el.innerHTML = ''; var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; $('ltitle').textContent = title; items.forEach(function(p) { var row = document.createElement('div'); row.className = 'li'; var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); }
   function toggleLegend() { var lg = $('legend'), btn = $('toggle-legend-btn'); if (S.legendVis) { lg.classList.add('collapsed'); btn.innerHTML = '+'; } else { lg.classList.remove('collapsed'); btn.innerHTML = '−'; } S.legendVis = !S.legendVis; }
   var toastTmr;
-  function toast(m) { var el = $('dbg'); clearTimeout(toastTmr); el.style.color = '#4a7fe8'; el.textContent = m; toastTmr = setTimeout(function() { el.style.color = ''; doRender(); }, 2500); }
+  function toast(m) { var el = $('dbg'); clearTimeout(toastTmr); el.style.color = '#5b8def'; el.textContent = m; toastTmr = setTimeout(function() { el.style.color = ''; doRender(); }, 2500); }
 
   setInterval(function() { if (!S.playing && !S.manualTime) { var n = nowTs(); if (n !== S.ts) { S.ts = n; updHUD(); forceRefresh(); toast('Новые данные'); } } buildFrames(); }, 60000);
 
-  // ─── ПРИЦЕЛ И ПИКСЕЛЬНЫЙ ПОПАП ──────────────────────────
   var hoverEl = $('hover-indicator'), popupEl = $('pixel-popup'), crosshairEl = $('crosshair'), crosshairLbl = $('crosshair-label');
   var popupVisible = false, crosshairMode = false;
   function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -377,44 +213,18 @@
       if (r.sw <= 0 || r.sh <= 0 || mx < r.sx || mx >= r.sx + r.sw || my < r.sy || my >= r.sy + r.sh) continue; 
       var ck = CK(t.x, t.y), entry = S.cache.get(ck); 
       if (!entry || !entry.canvas) return null; 
-      
-      // Учитываем размер канваса (512 для 1км, 256 для остальных)
-      var targetSize = entry.canvas.width; 
-      var effectivePx = (S.px < 1) ? 1 : S.px; 
-      
+      var targetSize = entry.canvas.width; var effectivePx = (S.px < 1) ? 1 : S.px; 
       var oxF = Math.max(0, Math.min(targetSize - 0.1, (mx - r.sx) / r.sw * targetSize)); 
       var oyF = Math.max(0, Math.min(targetSize - 0.1, (my - r.sy) / r.sh * targetSize)); 
-      var bx = Math.floor(oxF / effectivePx) * effectivePx; 
-      var by = Math.floor(oyF / effectivePx) * effectivePx; 
-      var bx2 = Math.min(bx + effectivePx, targetSize); 
-      var by2 = Math.min(by + effectivePx, targetSize); 
-      var cx2 = (bx + bx2) / 2 | 0; 
-      var cy2 = (by + by2) / 2 | 0; 
-      
+      var bx = Math.floor(oxF / effectivePx) * effectivePx; var by = Math.floor(oyF / effectivePx) * effectivePx; 
+      var bx2 = Math.min(bx + effectivePx, targetSize); var by2 = Math.min(by + effectivePx, targetSize); 
+      var cx2 = (bx + bx2) / 2 | 0; var cy2 = (by + by2) / 2 | 0; 
       try { 
         var pd = entry.canvas.getContext('2d').getImageData(cx2, cy2, 1, 1).data; 
         if (!pd[3]) return null; 
-        var scX = r.sw / targetSize; 
-        var scY = r.sh / targetSize; 
-        var dbz = -1; 
-        if (entry.raw && entry.raw.length > 0) { 
-          var ix = Math.round(cx2); 
-          var iy = Math.round(cy2); 
-          if (ix >= 0 && ix < targetSize && iy >= 0 && iy < targetSize) { 
-            var rawIdx = iy * targetSize + ix; 
-            if (rawIdx < entry.raw.length) { 
-              dbz = entry.raw[rawIdx]; 
-            } 
-          } 
-        } 
-        return { 
-          sx: r.sx + Math.round(bx * scX), 
-          sy: r.sy + Math.round(by * scY), 
-          sw: Math.max(4, Math.round(effectivePx * scX)), 
-          sh: Math.max(4, Math.round(effectivePx * scY)), 
-          color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')', 
-          r: pd[0], g: pd[1], b: pd[2], info: findPalEntry(pd[0], pd[1], pd[2]), dbz: dbz 
-        }; 
+        var scX = r.sw / targetSize; var scY = r.sh / targetSize; var dbz = -1; 
+        if (entry.raw && entry.raw.length > 0) { var ix = Math.round(cx2); var iy = Math.round(cy2); if (ix >= 0 && ix < targetSize && iy >= 0 && iy < targetSize) { var rawIdx = iy * targetSize + ix; if (rawIdx < entry.raw.length) { dbz = entry.raw[rawIdx]; } } } 
+        return { sx: r.sx + Math.round(bx * scX), sy: r.sy + Math.round(by * scY), sw: Math.max(4, Math.round(effectivePx * scX)), sh: Math.max(4, Math.round(effectivePx * scY)), color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')', r: pd[0], g: pd[1], b: pd[2], info: findPalEntry(pd[0], pd[1], pd[2]), dbz: dbz }; 
       } catch (e) { return null; } 
     } 
     return null; 
@@ -427,7 +237,6 @@
   map.on('mousemove', function(e) { if (crosshairMode) { requestAnimationFrame(updateCrosshair); return; } var p = e.containerPoint, block = getBlockAt(p.x, p.y); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none'; });
   map.on('click', function(e) { if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint, block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
 
-  // ─── МОДАЛЬНОЕ ОКНО ПАЛИТР ──────────────────────────────
   var modal = $('palette-modal'), modalClose = $('modal-close'), modalTabs = document.querySelectorAll('.modal-tabs button'), paletteListContainer = $('palette-list-container'), loadPaletteBtn = $('load-palette-btn'), fileInput = $('file-input'), createPaletteBtn = $('create-palette-btn'), deletePaletteBtn = $('delete-palette-btn'), exportPaletteBtn = $('export-palette-btn'), createForm = $('create-form'), newPalName = $('new-pal-name'), entryVal = $('entry-val'), entryColor = $('entry-color'), entryLabel = $('entry-label'), addEntryBtn = $('add-entry-btn'), entriesList = $('entries-list'), savePaletteBtn = $('save-palette-btn'), cancelCreateBtn = $('cancel-create-btn');
   var currentLayerForModal = 'radar'; var tempEntries = []; var editingIndex = -1; var editingEntryIndex = -1;
   function openModal() { modal.classList.add('open'); currentLayerForModal = S.layer; modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
@@ -457,59 +266,23 @@
   deletePaletteBtn.addEventListener('click', function() { var list = palettes[currentLayerForModal].list; var idx = palettes[currentLayerForModal].activeIdx; if (idx >= list.length) return; if (list[idx].builtin) { toast('Нельзя удалить встроенную палитру'); return; } if (confirm('Удалить активную палитру "' + list[idx].name + '"?')) { list.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } });
   $('btn-palettes').addEventListener('click', openModal);
 
-  // ─── ПРОЗРАЧНОСТЬ, ТЕМА, СПРАВКА ─────────────────────────
   var opacitySlider = $('opacity-slider');
   var opacityVal = $('opacity-val');
-  if (opacitySlider) {
-    opacitySlider.addEventListener('input', function() {
-      var val = parseInt(this.value);
-      canvas.style.opacity = val / 100;
-      opacityVal.textContent = val + '%';
-    });
-  }
+  if (opacitySlider) { opacitySlider.addEventListener('input', function() { var val = parseInt(this.value); canvas.style.opacity = val / 100; opacityVal.textContent = val + '%'; }); }
 
   var helpModal = $('help-modal');
   var helpClose = $('help-close');
-  if ($('btn-help')) {
-    $('btn-help').addEventListener('click', function() {
-      if (helpModal) helpModal.classList.add('open');
-    });
-  }
-  if (helpClose) {
-    helpClose.addEventListener('click', function() {
-      if (helpModal) helpModal.classList.remove('open');
-    });
-  }
+  if ($('btn-help')) { $('btn-help').addEventListener('click', function() { if (helpModal) helpModal.classList.add('open'); }); }
+  if (helpClose) { helpClose.addEventListener('click', function() { if (helpModal) helpModal.classList.remove('open'); }); }
 
-  if ($('btn-theme')) {
-    $('btn-theme').addEventListener('click', function() {
-      document.body.classList.toggle('light-theme');
-      var isLight = document.body.classList.contains('light-theme');
-      toast(isLight ? 'Светлая тема включена' : 'Темная тема включена');
-      if (map.hasLayer(darkTileLayer)) {
-        map.removeLayer(darkTileLayer);
-        lightTileLayer.addTo(map);
-      } else {
-        map.removeLayer(lightTileLayer);
-        darkTileLayer.addTo(map);
-      }
-    });
-  }
+  if ($('btn-theme')) { $('btn-theme').addEventListener('click', function() { document.body.classList.toggle('light-theme'); var isLight = document.body.classList.contains('light-theme'); toast(isLight ? 'Светлая тема включена' : 'Темная тема включена'); if (map.hasLayer(darkTileLayer)) { map.removeLayer(darkTileLayer); lightTileLayer.addTo(map); } else { map.removeLayer(lightTileLayer); darkTileLayer.addTo(map); } }); }
 
-  // ─── ИНИЦИАЛИЗАЦИЯ ─────────────────────────────────────────
-  loadPalettesFromStorage();
-  buildLegend();
-  buildFrames();
-  updHUD();
-  updatePxLabel();
-  schedRender();
+  loadPalettesFromStorage(); buildLegend(); buildFrames(); updHUD(); updatePxLabel(); schedRender();
 
-  // ─── ПРИВЯЗКА СОБЫТИЙ ─────────────────────────────────────
   $('playbtn').addEventListener('click', togglePlay);
   $('spd').addEventListener('click', cycleSpeed);
   $('pxbtn').addEventListener('click', cyclePx);
   $('btn-smooth').addEventListener('click', toggleSmooth);
-  $('btn-layer').addEventListener('click', toggleLayer);
   $('btn-refresh').addEventListener('click', doRefresh);
   $('btn-crosshair').addEventListener('click', toggleCrosshair);
   $('btn-ruler').addEventListener('click', toggleRuler);
@@ -518,6 +291,10 @@
   $('b-plus10m').addEventListener('click', function() { shiftTs(600); });
   $('toggle-legend-btn').addEventListener('click', function(e) { e.stopPropagation(); toggleLegend(); });
   $('legend-header').addEventListener('click', toggleLegend);
+
+  $('btn-layers-menu').addEventListener('click', function(e) { e.stopPropagation(); $('layers-dropdown').classList.toggle('visible'); });
+  document.querySelectorAll('#layers-dropdown .dd-item').forEach(function(item) { item.addEventListener('click', function() { setLayer(this.dataset.layer); $('layers-dropdown').classList.remove('visible'); }); });
+  document.addEventListener('click', function(e) { if (!$('layers-wrapper').contains(e.target)) { $('layers-dropdown').classList.remove('visible'); } });
 
   var smoothSlider = $('smooth-strength');
   var smoothValEl = $('smooth-val');
@@ -528,12 +305,6 @@
   map.on('move moveend zoomend', function() { if (crosshairMode) updateCrosshair(); });
   window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
 
-  window.closeModal = closeModal;
-  window.openModal = openModal;
-  window.toggleLayer = toggleLayer;
-
-  // Пульс авторизации
-  setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
-
+  window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
   console.log('2×2 Радар загружен. 1x1 км интерполяция активна.');
 })();
