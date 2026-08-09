@@ -115,12 +115,9 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
+    <script>
+    // Скрипт пульса (чтобы сервер не выкинул из аккаунта)
     setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
-    document.getElementById('btn-logout').addEventListener('click', async () => {
-      await fetch('/api/auth?action=logout', { method: 'POST' });
-      window.location.href = '/';
-    });
   </script>
   <script src="script.js"></script>
 </body>
