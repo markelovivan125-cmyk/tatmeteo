@@ -21,6 +21,7 @@
       <div class="dropdown-menu" id="layers-dropdown">
         <div class="dd-item active" data-layer="radar">Отражаемость (dBZ)</div>
         <div class="dd-item" data-layer="wx">ОЯ Явления</div>
+        <div class="dd-item" data-layer="sat">Спутник (EUMETSAT)</div>
       </div>
     </div>
     <div class="sep"></div>
@@ -117,9 +118,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // Скрипт пульса (чтобы сервер не выкинул из аккаунта)
     setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
-    // Кнопка выхода
     document.getElementById('btn-logout').addEventListener('click', async () => {
       await fetch('/api/auth?action=logout', { method: 'POST' });
       window.location.href = '/';
