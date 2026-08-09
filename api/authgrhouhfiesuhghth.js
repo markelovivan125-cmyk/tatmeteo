@@ -57,18 +57,21 @@ export default async function handler(req, res) {
       } else {
         const newDevToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
         await redis.set(`device:${password}`, newDevToken);
-        res.setHeader('Set-Cookie', `device_token=${newDevToken}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax`);
+        res.setHeader('Set-Cookie', `device_token=${newDevToken}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`);
       }
 
       await redis.del(`attempts:${userIp}`);
 
       const sid = Math.random().toString(36).slice(2);
-      await redis.set(`sess:${password}:${sid}`, userIp, { ex: 86400 });
+      // Сохраняем сессию БЕЗ таймера (навсегда)
+      await redis.set(`sess:${password}:${sid}`, userIp);
+      
       await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${password} | Вход`);
 
+      // Куки живут 10 лет
       res.setHeader('Set-Cookie', [
-        `auth_pass=${password}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`,
-        `auth_sid=${sid}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`
+        `auth_pass=${password}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`,
+        `auth_sid=${sid}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`
       ]);
       return res.json({ success: true });
     }
@@ -79,7 +82,10 @@ export default async function handler(req, res) {
       const sidMatch = cookies.match(/auth_sid=([^;]+)/);
       if (passMatch && sidMatch) {
         const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
-        if (exists === 1) await redis.set(`sess:${passMatch[1]}:${sidMatch[1]}`, userIp, { ex: 86400 });
+        if (exists === 1) {
+          // Просто перезаписываем IP (без продления таймера, так как его нет)
+          await redis.set(`sess:${passMatch[1]}:${sidMatch[1]}`, userIp);
+        }
       }
       return res.json({ success: true });
     }
