@@ -5,88 +5,93 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// Секретный ключ администратора (совпадает с ключом в public/admin.html)
-const ADMIN_SECRET = 'xR9_@dminK3y#2024Sec!';
+// --- НАСТРОЙКА БЕЗОПАСНОСТИ АДМИНА ---
+// Измените этот пароль на свой сложный!
+const ADMIN_MASTER_PASS = 'AdminRadar2024!'; 
 
 export default async function handler(req, res) {
-  // Проверка секретного ключа из URL (?secret=...) или из тела запроса
-  const secret = req.query.secret || req.body?.secret;
-  if (secret !== ADMIN_SECRET) {
-    return res.status(403).json({ error: 'Доступ запрещен' });
+  const action = req.query.action;
+  const cookies = req.headers.cookie || '';
+  const adminCookieMatch = cookies.match(/admin_sess=([^;]+)/);
+  const adminSess = adminCookieMatch ? adminCookieMatch[1] : null;
+
+  // 1. ВХОД В АДМИНКУ (Проверка мастер-пароля)
+  if (req.method === 'POST' && action === 'admin_login') {
+    const getBody = () => new Promise((resolve) => {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
+    });
+    const body = await getBody();
+
+    if (body.masterPassword === ADMIN_MASTER_PASS) {
+      // Выдаем секретный токен сессии
+      const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      await redis.set(`admin_sess:${token}`, '1', { ex: 86400 }); // Сессия на 24 часа
+      res.setHeader('Set-Cookie', `admin_sess=${token}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`);
+      return res.json({ success: true });
+    }
+    return res.status(401).json({ error: 'Неверный мастер-пароль' });
   }
 
+  // 2. ПРОВЕРКА АВТОРИЗАЦИИ ДЛЯ ВСЕХ ОСТАЛЬНЫХ ЗАПРОСОВ
+  let isAuthorized = false;
+  if (adminSess) {
+    const exists = await redis.get(`admin_sess:${adminSess}`);
+    if (exists) isAuthorized = true;
+  }
+
+  if (!isAuthorized) {
+    return res.status(403).json({ error: 'Доступ запрещен. Авторизуйтесь.' });
+  }
+
+  // --- АВТОРИЗОВАННЫЕ ДЕЙСТВИЯ ---
   try {
-    // --- ПОЛУЧЕНИЕ ДАННЫХ (GET) ---
     if (req.method === 'GET') {
       const passwords = await redis.smembers('passwords');
       const logs = await redis.lrange('logs', 0, 19);
 
       const passStatus = [];
       for (const p of passwords) {
-        // Ищем все активные сессии для этого пароля
         const keys = await redis.keys(`sess:${p}:*`);
         let ips = [];
         for (const k of keys) {
           const ip = await redis.get(k);
           if (ip) ips.push(ip);
         }
-        passStatus.push({ 
-          password: p, 
-          activeDevices: keys.length, 
-          ips: ips.join(', ') 
-        });
+        passStatus.push({ password: p, activeDevices: keys.length, ips: ips.join(', ') });
       }
 
       return res.json({ passwords: passStatus, logs });
     }
 
-    // --- ДЕЙСТВИЯ (POST) ---
     if (req.method === 'POST') {
-      // Надежное чтение тела запроса
       const getBody = () => new Promise((resolve) => {
         let body = '';
         req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-          try { resolve(JSON.parse(body)); } 
-          catch { resolve({}); }
-        });
+        req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
       });
-
       const body = await getBody();
-      const { action, password } = body;
+      const { action: postAction, password } = body;
 
-      // Генерация нового пароля
-      if (action === 'generate') {
+      if (postAction === 'generate') {
         const newPass = Math.random().toString(36).slice(2, 10);
         await redis.sadd('passwords', newPass);
         return res.json({ success: true, password: newPass });
       }
 
-      // Удаление пароля
-      if (action === 'delete') {
-        if (!password) return res.status(400).json({ error: 'Не указан пароль для удаления' });
-        
-        // Удаляем сам пароль из множества
+      if (postAction === 'delete') {
+        if (!password) return res.status(400).json({ error: 'Не указан пароль' });
         await redis.srem('passwords', password);
-        
-        // Удаляем привязку устройства (чтобы пароль стал полностью чист)
         await redis.del(`device:${password}`);
-        
-        // Удаляем все активные сессии этого пароля (выкидываем юзера, если он онлайн)
         const keys = await redis.keys(`sess:${password}:*`);
-        if (keys.length > 0) {
-          await redis.del(...keys);
-        }
-        
+        if (keys.length > 0) await redis.del(...keys);
         return res.json({ success: true });
       }
     }
 
-    // Если метод не GET и не POST
     return res.status(404).json({ error: 'Not found' });
-
   } catch (error) {
-    console.error('Admin API Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }
