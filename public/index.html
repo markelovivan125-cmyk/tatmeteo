@@ -7,9 +7,119 @@
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
+  
+  <!-- Стили для экрана авторизации -->
+  <style>
+    #auth-overlay {
+      position: fixed; inset: 0; z-index: 99999;
+      background: rgba(5, 5, 10, 0.98);
+      backdrop-filter: blur(10px);
+      display: flex; align-items: center; justify-content: center;
+      animation: authFadeIn 0.5s ease-out;
+    }
+    #auth-overlay.hidden { display: none; }
+    @keyframes authFadeIn { 0% { opacity: 0; } 100% { opacity: 1; } }
+
+    .auth-box {
+      background: rgba(15, 15, 26, 0.9);
+      border: 1px solid var(--neon-cyan);
+      border-radius: 12px;
+      padding: 40px;
+      width: 100%; max-width: 380px;
+      text-align: center;
+      box-shadow: 0 0 60px rgba(0, 240, 255, 0.15);
+      position: relative;
+      overflow: hidden;
+    }
+    .auth-box::before {
+      content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+      animation: authScan 3s infinite linear;
+    }
+    @keyframes authScan { 0% { left: -100%; } 100% { left: 100%; } }
+
+    .auth-logo {
+      font-family: 'Orbitron', monospace; font-size: 36px; font-weight: 900;
+      color: var(--neon-cyan); text-shadow: 0 0 20px var(--neon-cyan);
+      margin-bottom: 5px;
+    }
+    .auth-subtitle {
+      font-family: 'Orbitron', monospace; font-size: 11px; letter-spacing: 3px;
+      color: var(--text-dim); margin-bottom: 30px; text-transform: uppercase;
+    }
+
+    .auth-form input {
+      width: 100%; box-sizing: border-box;
+      background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border);
+      color: var(--text); padding: 12px 15px; border-radius: 6px;
+      font-size: 16px; font-family: 'Rajdhani', sans-serif;
+      margin-bottom: 15px; outline: none; transition: 0.2s;
+    }
+    .auth-form input:focus {
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+    }
+
+    .auth-captcha-box {
+      display: flex; gap: 10px; margin-bottom: 20px; align-items: center;
+    }
+    .auth-captcha-img {
+      flex: 1; height: 50px; background: #1a1a2e; border: 1px solid var(--glass-border);
+      border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .auth-captcha-img svg { width: 100%; height: 100%; }
+    .auth-captcha-box input {
+      width: 100px; margin-bottom: 0; text-align: center; text-transform: uppercase;
+      letter-spacing: 2px; font-weight: 700;
+    }
+
+    .auth-btn {
+      width: 100%; padding: 14px;
+      background: linear-gradient(45deg, var(--neon-cyan), var(--neon-purple));
+      color: #000; border: 0; border-radius: 6px;
+      font-family: 'Orbitron', monospace; font-weight: 700; font-size: 14px;
+      letter-spacing: 2px; cursor: pointer; transition: 0.3s;
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+    }
+    .auth-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 30px rgba(0, 240, 255, 0.5);
+    }
+    .auth-btn:active { transform: translateY(0); }
+
+    .auth-error {
+      color: var(--neon-pink); font-size: 13px; margin-top: 15px;
+      font-family: 'Rajdhani', sans-serif; display: none;
+      text-shadow: 0 0 10px rgba(255, 0, 255, 0.3);
+    }
+    .auth-footer {
+      margin-top: 25px; font-size: 10px; color: var(--text-dim);
+      font-family: 'Orbitron', monospace; letter-spacing: 1px;
+    }
+  </style>
 </head>
 <body>
 
+  <!-- ЭКРАН АВТОРИЗАЦИИ -->
+  <div id="auth-overlay">
+    <div class="auth-box">
+      <div class="auth-logo">2×2</div>
+      <div class="auth-subtitle">ДОСТУП К СИСТЕМЕ</div>
+      <form id="auth-form" class="auth-form">
+        <input type="password" id="auth-pass" placeholder="Секретный пароль" required autocomplete="off">
+        <div class="auth-captcha-box">
+          <div id="auth-captcha-img" class="auth-captcha-img" title="Обновить код"></div>
+          <input type="text" id="auth-captcha" placeholder="Код" required maxlength="5" autocomplete="off">
+        </div>
+        <button type="submit" class="auth-btn">ВОЙТИ В СИСТЕМУ</button>
+        <div id="auth-error" class="auth-error"></div>
+      </form>
+      <div class="auth-footer">CSF | CONVECTIVE STORM FORECAST</div>
+    </div>
+  </div>
+
+  <!-- ОСНОВНОЙ ИНТЕРФЕЙС -->
   <div id="map"></div>
   <canvas id="radar"></canvas>
 
@@ -31,10 +141,8 @@
     <div class="sep"></div>
     <button class="btn icon-btn" id="btn-palettes" title="Палитры">🎨</button>
     <button class="btn" id="btn-help">Справка</button>
-    <!-- Кнопка переключения темы -->
     <button class="btn" id="btn-theme">Тема</button>
 
-    <!-- Регулятор прозрачности -->
     <div id="opacity-control">
       <label>🌓</label>
       <input type="range" id="opacity-slider" min="0" max="100" value="100" />
@@ -123,7 +231,7 @@
     </div>
   </div>
 
-  <!-- ─── НОВАЯ ЗАСТАВКА ─── -->
+  <!-- ЗАСТАВКА -->
   <div id="splash-screen">
     <div class="splash-bg"></div>
     <div class="stars"></div>
@@ -150,6 +258,91 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // === ЛОГИКА АВТОРИЗАЦИИ И КАПЧИ ===
+    let currentCaptchaId = null;
+
+    async function loadCaptcha() {
+      try {
+        const res = await fetch('/api/captcha');
+        const data = await res.json();
+        currentCaptchaId = data.id;
+        document.getElementById('auth-captcha-img').innerHTML = data.svg;
+      } catch (e) {
+        console.error('Ошибка загрузки капчи:', e);
+      }
+    }
+
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/me');
+        const data = await res.json();
+        if (data.auth) {
+          document.getElementById('auth-overlay').classList.add('hidden');
+          startHeartbeat(); // Запускаем пульс, если авторизованы
+        } else {
+          document.getElementById('auth-overlay').classList.remove('hidden');
+          loadCaptcha();
+        }
+      } catch (e) {
+        // Если сервер недоступен, показываем окно входа
+        document.getElementById('auth-overlay').classList.remove('hidden');
+        loadCaptcha();
+      }
+    }
+
+    function startHeartbeat() {
+      setInterval(() => {
+        fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{});
+      }, 15000);
+    }
+
+    document.getElementById('auth-captcha-img').addEventListener('click', loadCaptcha);
+
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pass = document.getElementById('auth-pass').value;
+      const captchaCode = document.getElementById('auth-captcha').value;
+      const errBox = document.getElementById('auth-error');
+      const btn = e.target.querySelector('.auth-btn');
+      
+      errBox.style.display = 'none';
+      btn.textContent = 'ПРОВЕРКА...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/auth?action=login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            password: pass,
+            captchaId: currentCaptchaId,
+            captchaCode: captchaCode
+          })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById('auth-overlay').classList.add('hidden');
+          startHeartbeat();
+        } else {
+          errBox.textContent = data.error || 'Ошибка авторизации';
+          errBox.style.display = 'block';
+          loadCaptcha();
+        }
+      } catch (err) {
+        errBox.textContent = 'Сбой сети. Попробуйте снова.';
+        errBox.style.display = 'block';
+        loadCaptcha();
+      } finally {
+        btn.textContent = 'ВОЙТИ В СИСТЕМУ';
+        btn.disabled = false;
+      }
+    });
+
+    // Проверяем авторизацию сразу при загрузке страницы
+    checkAuth();
+  </script>
   <script src="script.js"></script>
 </body>
 </html>
