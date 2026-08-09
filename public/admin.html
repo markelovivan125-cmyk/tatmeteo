@@ -19,63 +19,101 @@
         .ip-list { color: #aaa; font-size: 12px; margin-top: 4px; }
         .err { color: #ff5252; font-family: monospace; background: #2a0000; padding: 10px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
         .summary { background: #111; padding: 10px 15px; border-radius: 5px; margin-bottom: 20px; font-size: 14px; color: #7ab4ff; border: 1px solid #333; }
+        
+        /* Стили формы входа */
+        #login-box { background: #1a1a1a; padding: 30px; border-radius: 8px; max-width: 400px; margin: 50px auto; text-align: center; }
+        #login-box input { width: 100%; padding: 12px; margin-bottom: 15px; background: #0a0a0a; border: 1px solid #444; color: #fff; border-radius: 5px; box-sizing: border-box; }
     </style>
 </head>
 <body>
     <h1>Админ-панель</h1>
-    
-    <div class="summary" id="summary">Загрузка статистики...</div>
-    
-    <button id="gen">➕ Сгенерировать новый пароль</button>
-    <div id="list" style="margin-top: 20px;"></div>
+
+    <!-- Форма входа (показывается, если нет авторизации) -->
+    <div id="login-box" style="display: none;">
+        <h3>🔒 Вход для администратора</h3>
+        <input type="password" id="master-pass" placeholder="Введите мастер-пароль">
+        <button id="login-btn" style="width: 100%;">Войти</button>
+        <div class="err" id="login-err" style="margin-top: 10px; background: transparent;"></div>
+    </div>
+
+    <!-- Панель управления (показывается после входа) -->
+    <div id="dashboard" style="display: none;">
+        <div class="summary" id="summary">Загрузка статистики...</div>
+        <button id="gen">➕ Сгенерировать новый пароль</button>
+        <div id="list" style="margin-top: 20px;"></div>
+    </div>
 
     <script>
-        // Тот самый секретный ключ. Он совпадает с ключом в api/admin.js
-        const SECRET = 'xR9_@dminK3y#2024Sec!';
+        // Функция проверки, авторизованы ли мы
+        async function checkAuth() {
+            try {
+                const res = await fetch('/api/admin');
+                if (res.ok) {
+                    // Если сервер пускает (200 OK), показываем панель
+                    document.getElementById('login-box').style.display = 'none';
+                    document.getElementById('dashboard').style.display = 'block';
+                    load();
+                } else {
+                    // Если 403, показываем форму входа
+                    document.getElementById('login-box').style.display = 'block';
+                    document.getElementById('dashboard').style.display = 'none';
+                }
+            } catch (e) {
+                document.getElementById('login-box').style.display = 'block';
+            }
+        }
 
+        // Вход в админку
+        document.getElementById('login-btn').onclick = async () => {
+            const pass = document.getElementById('master-pass').value;
+            const errBox = document.getElementById('login-err');
+            errBox.style.display = 'none';
+
+            const res = await fetch('/api/admin?action=admin_login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ masterPassword: pass })
+            });
+
+            if (res.ok) {
+                checkAuth(); // Проверяем снова, теперь должно пустить
+            } else {
+                const data = await res.json();
+                errBox.textContent = data.error || 'Ошибка входа';
+                errBox.style.display = 'block';
+            }
+        };
+
+        // Загрузка данных панели
         async function load() {
             try {
-                // Передаем ключ в URL: /api/admin?secret=КЛЮЧ
-                const res = await fetch('/api/admin?secret=' + SECRET);
+                const res = await fetch('/api/admin');
                 if (!res.ok) {
-                    const errText = await res.text();
-                    document.getElementById('list').innerHTML = `<div class="err">Ошибка загрузки (Статус ${res.status}):<br><br>${errText}</div>`;
-                    document.getElementById('summary').innerHTML = 'Ошибка загрузки статистики';
+                    checkAuth(); // Если сессия истекла, снова покажет форму входа
                     return;
                 }
                 const data = await res.json();
                 
-                // Считаем общую статистику
                 let totalPasswords = data.passwords.length;
                 let totalActiveDevices = 0;
                 data.passwords.forEach(p => { totalActiveDevices += p.activeDevices; });
                 document.getElementById('summary').innerHTML = `📊 Всего паролей: <b>${totalPasswords}</b> | 👥 Устройств онлайн: <b>${totalActiveDevices}</b>`;
 
                 let html = '<h2>Список паролей:</h2><ul>';
-                if (data.passwords.length === 0) {
-                    html += '<li>Паролей пока нет. Сгенерируйте новый.</li>';
-                }
+                if (data.passwords.length === 0) html += '<li>Паролей пока нет. Сгенерируйте новый.</li>';
                 
                 data.passwords.forEach(p => {
                     const isBusy = p.activeDevices > 0;
-                    const statusText = isBusy 
-                        ? `<span class="status-busy">🟥 ИСПОЛЬЗУЕТСЯ</span>` 
-                        : `<span class="status-free">🟩 СВОБОДЕН</span>`;
-                    
+                    const statusText = isBusy ? `<span class="status-busy">🟥 ИСПОЛЬЗУЕТСЯ</span>` : `<span class="status-free">🟩 СВОБОДЕН</span>`;
                     html += `<li class="${isBusy ? 'active-pass' : ''}">
                         <span class="pass-name">🔑 Пароль: ${p.password}</span>
-                        <div class="device-info">
-                            Статус: ${statusText}<br>
-                            Устройств онлайн: <b>${p.activeDevices}</b> из <b>1</b>
-                        </div>
+                        <div class="device-info">Статус: ${statusText}<br>Устройств онлайн: <b>${p.activeDevices}</b> из <b>1</b></div>
                         <div class="ip-list">IP: ${p.ips || '— нет подключений —'}</div>
                         <button class="del" style="margin-top:10px;" onclick="del('${p.password}')">🗑 Удалить пароль</button>
                     </li>`;
                 });
                 html += '</ul><h2>Логи (последние 20):</h2><ul>';
-                if (data.logs.length === 0) {
-                    html += '<li>Логов нет.</li>';
-                }
+                if (data.logs.length === 0) html += '<li>Логов нет.</li>';
                 data.logs.forEach(l => html += `<li style="padding: 8px; font-size: 12px;">${l}</li>`);
                 html += '</ul>';
                 
@@ -89,40 +127,24 @@
             const btn = document.getElementById('gen');
             btn.textContent = 'Генерация...';
             btn.disabled = true;
-            
             try {
-                // Передаем ключ в теле запроса
-                const res = await fetch('/api/admin?secret=' + SECRET, { 
-                    method: 'POST', 
-                    headers: {'Content-Type':'application/json'}, 
-                    body: JSON.stringify({ action: 'generate' }) 
-                });
-                const data = await res.json();
-                
-                if (!res.ok || data.error) {
-                    alert('Ошибка генерации: ' + (data.error || 'Неизвестная ошибка'));
-                }
-            } catch (e) {
-                alert('Сетевая ошибка: ' + e.message);
+                await fetch('/api/admin', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ action: 'generate' }) });
+                load();
             } finally {
                 btn.textContent = '➕ Сгенерировать новый пароль';
                 btn.disabled = false;
-                load();
             }
         };
 
         async function del(pass) {
             if (confirm('Удалить этот пароль?')) {
-                await fetch('/api/admin?secret=' + SECRET, { 
-                    method: 'POST', 
-                    headers: {'Content-Type':'application/json'}, 
-                    body: JSON.stringify({ action: 'delete', password: pass }) 
-                });
+                await fetch('/api/admin', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ action: 'delete', password: pass }) });
                 load();
             }
         }
 
-        load();
+        // Запускаем проверку при открытии страницы
+        checkAuth();
         setInterval(load, 5000);
     </script>
 </body>
