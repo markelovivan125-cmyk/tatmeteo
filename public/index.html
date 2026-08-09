@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
   
-  <!-- Стили для экрана авторизации (Тёмно-зелёный неон) -->
   <style>
     :root {
       --neon-green-auth: #00ff9d;
@@ -74,15 +73,11 @@
       background: rgba(0, 30, 15, 0.8);
     }
 
-    .auth-captcha-box {
-      display: flex; gap: 10px; margin-bottom: 20px; align-items: center;
-    }
+    .auth-captcha-box { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
     .auth-captcha-img {
       flex: 1; height: 50px; background: #051a0e; 
-      border: 1px solid var(--auth-border);
-      border-radius: 6px; cursor: pointer; display: flex; 
-      align-items: center; justify-content: center;
-      overflow: hidden;
+      border: 1px solid var(--auth-border); border-radius: 6px; cursor: pointer; 
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
     }
     .auth-captcha-img svg { width: 100%; height: 100%; }
     .auth-captcha-box input {
@@ -98,22 +93,11 @@
       letter-spacing: 2px; cursor: pointer; transition: 0.3s;
       box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
     }
-    .auth-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 5px 30px rgba(0, 255, 157, 0.6);
-      background: linear-gradient(45deg, var(--neon-green-auth), var(--neon-green-dark));
-    }
+    .auth-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 30px rgba(0, 255, 157, 0.6); background: linear-gradient(45deg, var(--neon-green-auth), var(--neon-green-dark)); }
     .auth-btn:active { transform: translateY(0); }
 
-    .auth-error {
-      color: #ff4d6d; font-size: 13px; margin-top: 15px;
-      font-family: 'Rajdhani', sans-serif; display: none;
-      text-shadow: 0 0 10px rgba(255, 77, 109, 0.5);
-    }
-    .auth-footer {
-      margin-top: 25px; font-size: 10px; color: var(--auth-text-dim);
-      font-family: 'Orbitron', monospace; letter-spacing: 1px;
-    }
+    .auth-error { color: #ff4d6d; font-size: 13px; margin-top: 15px; font-family: 'Rajdhani', sans-serif; display: none; text-shadow: 0 0 10px rgba(255, 77, 109, 0.5); }
+    .auth-footer { margin-top: 25px; font-size: 10px; color: var(--auth-text-dim); font-family: 'Orbitron', monospace; letter-spacing: 1px; }
   </style>
 </head>
 <body>
@@ -200,14 +184,8 @@
   <!-- Модальное окно палитр -->
   <div id="palette-modal">
     <div class="modal-content">
-      <h2>
-        <span>🎨 Управление палитрами</span>
-        <button class="modal-close" id="modal-close">&times;</button>
-      </h2>
-      <div class="modal-tabs">
-        <button class="active" data-layer="radar">Отражаемость</button>
-        <button data-layer="wx">Явления</button>
-      </div>
+      <h2><span>🎨 Управление палитрами</span><button class="modal-close" id="modal-close">&times;</button></h2>
+      <div class="modal-tabs"><button class="active" data-layer="radar">Отражаемость</button><button data-layer="wx">Явления</button></div>
       <div id="palette-list-container" class="palette-list"></div>
       <div class="modal-actions">
         <button class="btn btn-primary" id="load-palette-btn">📂 Загрузить .pal</button>
@@ -216,10 +194,8 @@
         <button class="btn" id="export-palette-btn" style="color:var(--neon-green);">💾 Экспорт</button>
       </div>
       <input type="file" id="file-input" accept=".pal,.json,.txt" />
-
       <div class="create-form" id="create-form">
-        <label>Название палитры</label>
-        <input type="text" id="new-pal-name" placeholder="Моя палитра" value="Новая палитра" />
+        <label>Название палитры</label><input type="text" id="new-pal-name" placeholder="Моя палитра" value="Новая палитра" />
         <label>Значения (порог, цвет, метка)</label>
         <div class="row">
           <input type="number" id="entry-val" placeholder="дБZ" value="0" step="1" />
@@ -239,14 +215,8 @@
   <!-- Модальное окно справки -->
   <div id="help-modal" class="modal-overlay">
     <div class="modal-content">
-      <h2>
-        <span>📘 Справка</span>
-        <button class="modal-close" id="help-close">&times;</button>
-      </h2>
-      <p>
-        Кибер радар - сайт для визуализации данных и кастомизации отображения их. Изначальные данные только 2х2 км, данные 4х4, 8х8, 1х1 не являются полностью достоверными!<br><br>
-        Разработано при помощи DeepSeek от команды CSF | Convective Storm Forecast
-      </p>
+      <h2><span>📘 Справка</span><button class="modal-close" id="help-close">&times;</button></h2>
+      <p>Кибер радар - сайт для визуализации данных и кастомизации отображения их. Изначальные данные только 2х2 км, данные 4х4, 8х8, 1х1 не являются полностью достоверными!<br><br>Разработано при помощи DeepSeek от команды CSF | Convective Storm Forecast</p>
     </div>
   </div>
 
@@ -261,9 +231,7 @@
         const data = await res.json();
         currentCaptchaId = data.id;
         document.getElementById('auth-captcha-img').innerHTML = data.svg;
-      } catch (e) {
-        console.error('Ошибка загрузки капчи:', e);
-      }
+      } catch (e) { console.error('Ошибка загрузки капчи:', e); }
     }
 
     async function checkAuth() {
@@ -272,7 +240,9 @@
         const data = await res.json();
         if (data.auth) {
           document.getElementById('auth-overlay').classList.add('hidden');
-          startHeartbeat(); // Запускаем пульс, если авторизованы
+          startHeartbeat();
+          // ЗАСТАВЛЯЕМ КАРТУ ЗАГРУЗИТЬСЯ
+          setTimeout(() => { if (typeof map !== 'undefined') map.invalidateSize(); }, 300);
         } else {
           document.getElementById('auth-overlay').classList.remove('hidden');
           loadCaptcha();
@@ -284,9 +254,7 @@
     }
 
     function startHeartbeat() {
-      setInterval(() => {
-        fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{});
-      }, 15000);
+      setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
     }
 
     document.getElementById('auth-captcha-img').addEventListener('click', loadCaptcha);
@@ -306,17 +274,15 @@
         const res = await fetch('/api/auth?action=login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            password: pass,
-            captchaId: currentCaptchaId,
-            captchaCode: captchaCode
-          })
+          body: JSON.stringify({ password: pass, captchaId: currentCaptchaId, captchaCode: captchaCode })
         });
         const data = await res.json();
 
         if (data.success) {
           document.getElementById('auth-overlay').classList.add('hidden');
           startHeartbeat();
+          // ЗАСТАВЛЯЕМ КАРТУ ЗАГРУЗИТЬСЯ ПОСЛЕ ВХОДА
+          setTimeout(() => { if (typeof map !== 'undefined') map.invalidateSize(); }, 300);
         } else {
           errBox.textContent = data.error || 'Ошибка авторизации';
           errBox.style.display = 'block';
@@ -332,13 +298,11 @@
       }
     });
 
-    // Кнопка выхода
     document.getElementById('btn-logout').addEventListener('click', async () => {
       await fetch('/api/auth?action=logout', { method: 'POST' });
       window.location.reload();
     });
 
-    // Проверяем авторизацию сразу при загрузке страницы
     checkAuth();
   </script>
   <script src="script.js"></script>
