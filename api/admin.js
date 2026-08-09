@@ -5,7 +5,7 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-const ADMIN_MASTER_PASS = 'AdminRadar2024!'; 
+const ADMIN_MASTER_PASS = 'УКРФTUNG1245TOR'; 
 
 export default async function handler(req, res) {
   const action = req.query.action;
