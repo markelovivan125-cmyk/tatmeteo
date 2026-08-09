@@ -107,7 +107,11 @@
 
   // ─── карта ─────────────────────────────────────────────────
   var map = L.map('map', { center: [57, 55], zoom: 6, minZoom: 3, maxZoom: 10, zoomControl: false, fadeAnimation: false, markerZoomAnimation: false, scrollWheelZoom: true, doubleClickZoom: true, boxZoom: true, touchZoom: true, keyboard: true });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20, attribution: '© OpenStreetMap, © CARTO' }).addTo(map);
+  
+  var darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20, attribution: '© OpenStreetMap, © CARTO' });
+  var lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20, attribution: '© OpenStreetMap, © CARTO' });
+  darkTileLayer.addTo(map);
+  
   L.control.scale({ position: 'bottomright', metric: true, imperial: false }).addTo(map);
   setTimeout(function() { map.invalidateSize(); }, 500);
 
@@ -140,8 +144,18 @@
     var out = document.createElement('canvas'); out.width = out.height = 256; var oc = out.getContext('2d'); oc.imageSmoothingEnabled = false;
     var effectivePx = (px < 1) ? 1 : px; var bw = Math.ceil(256 / effectivePx), bh = Math.ceil(256 / effectivePx);
     for (var py = 0; py < bh; py++) { for (var pxx = 0; pxx < bw; pxx++) { var x0 = pxx * effectivePx, y0 = py * effectivePx, x1 = Math.min(x0 + effectivePx, 256), y1 = Math.min(y0 + effectivePx, 256); var sum = 0, n = 0; for (var yy = y0; yy < y1; yy++) { for (var xx = x0; xx < x1; xx++) { var idx = yy * 256 + xx; if (smoothed[idx] >= 0) { sum += smoothed[idx]; n++; } } } if (n > 0) { var avg = Math.round(sum / n); var rgb = getColor(avg); if (rgb) { oc.fillStyle = 'rgb(' + rgb.join(',') + ')'; oc.fillRect(x0, y0, x1 - x0, y1 - y0); } } } }
+    
     var finalCanvas = out;
-    if (px < 1) { var scale = 1 / px; var bigCanvas = document.createElement('canvas'); bigCanvas.width = 256 * scale; bigCanvas.height = 256 * scale; var bigCtx = bigCanvas.getContext('2d'); bigCtx.imageSmoothingEnabled = false; bigCtx.drawImage(out, 0, 0, bigCanvas.width, bigCanvas.height); finalCanvas = bigCanvas; }
+    if (px < 1) {
+      var scale = 1 / px;
+      var bigCanvas = document.createElement('canvas');
+      bigCanvas.width = 256 * scale;
+      bigCanvas.height = 256 * scale;
+      var bigCtx = bigCanvas.getContext('2d');
+      bigCtx.imageSmoothingEnabled = true; // Включаем сглаживание для 1x1 км
+      bigCtx.drawImage(out, 0, 0, bigCanvas.width, bigCanvas.height);
+      finalCanvas = bigCanvas;
+    }
     return { canvas: finalCanvas, raw: smoothed, px: px, scaled: px < 1 };
   }
 
@@ -162,7 +176,21 @@
     renderPend = false; ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
     var alpha = S.fade.active ? S.fade.alpha : 1; var tiles = visTiles(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = false;
-    for (var i = 0; i < tiles.length; i++) { var t = tiles[i], ck = CK(t.x, t.y), entry = S.cache.get(ck); if (entry && entry.canvas) { var r = tileRect(t.x, t.y); if (r.sw > 0 && r.sh > 0) { if (entry.scaled) { var srcW = entry.canvas.width; var srcH = entry.canvas.height; ctx.drawImage(entry.canvas, 0, 0, srcW, srcH, r.sx, r.sy, r.sw, r.sh); } else { ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); } } } else { fetchTile(t.x, t.y); } }
+    for (var i = 0; i < tiles.length; i++) { 
+      var t = tiles[i], ck = CK(t.x, t.y), entry = S.cache.get(ck); 
+      if (entry && entry.canvas) { 
+        var r = tileRect(t.x, t.y); 
+        if (r.sw > 0 && r.sh > 0) { 
+          if (entry.scaled) { 
+            ctx.imageSmoothingEnabled = true; // Сглаживаем при отрисовке на карте
+            ctx.drawImage(entry.canvas, 0, 0, entry.canvas.width, entry.canvas.height, r.sx, r.sy, r.sw, r.sh); 
+            ctx.imageSmoothingEnabled = false; 
+          } else { 
+            ctx.drawImage(entry.canvas, r.sx, r.sy, r.sw, r.sh); 
+          } 
+        } 
+      } else { fetchTile(t.x, t.y); } 
+    }
     ctx.globalAlpha = 1;
     if (S.layer === 'wx') { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.beginPath(); for (var gi = 0; gi < tiles.length; gi++) { var gt = tiles[gi], gr = tileRect(gt.x, gt.y); if (gr.sw <= 0 || gr.sh <= 0) continue; var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY; if (bW < 1 || bH < 1) continue; var cols = Math.ceil(256 / S.px); for (var ci = 0; ci <= cols; ci++) { var lx = gr.sx + Math.round(ci * bW) + 0.5; ctx.moveTo(lx, gr.sy); ctx.lineTo(lx, gr.sy + gr.sh); } for (var ri = 0; ri <= cols; ri++) { var ly = gr.sy + Math.round(ri * bH) + 0.5; ctx.moveTo(gr.sx, ly); ctx.lineTo(gr.sx + gr.sw, ly); } } ctx.stroke(); ctx.restore(); }
   }
@@ -195,14 +223,14 @@
   function toggleLayer() { var newLayer = S.layer === 'radar' ? 'wx' : 'radar'; S.layer = newLayer; $('btn-layer').textContent = S.layer === 'radar' ? 'Отражаемость' : 'ОЯ Явления'; S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); S.fade.active = true; S.fade.start = performance.now(); S.fade.alpha = 0; buildLegend(); forceRefresh(); hidePopup(); if (S.ruler.active) toggleRuler(); }
   function cyclePx() { S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); }
   function updatePxLabel() {
-  var resKm = (S.px * BASE_RES_KM);
-  var label = resKm.toFixed(1) + ' км';
-  if (resKm === 1) label = '1x1 км';
-  if (resKm === 2) label = '2x2 км';
-  if (resKm === 4) label = '4x4 км';
-  if (resKm === 8) label = '8x8 км';
-  $('pxbtn').textContent = label;
-}
+    var resKm = (S.px * BASE_RES_KM);
+    var label = resKm.toFixed(1) + ' км';
+    if (resKm === 1) label = '1x1 км';
+    if (resKm === 2) label = '2x2 км';
+    if (resKm === 4) label = '4x4 км';
+    if (resKm === 8) label = '8x8 км';
+    $('pxbtn').textContent = label;
+  }
   function toggleSmooth() { S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); btn.textContent = 'Сглаживание ✓'; ctrl.classList.add('active'); } else { btn.classList.remove('on'); btn.textContent = 'Сглаживание'; ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); }
 
   // ─── ЛИНЕЙКА ──────────────────────────────────────────────
@@ -231,7 +259,7 @@
   function toggleCrosshair() { crosshairMode = !crosshairMode; var btn = $('btn-crosshair'); if (crosshairMode) { btn.classList.add('on'); crosshairEl.style.display = 'block'; updateCrosshair(); } else { btn.classList.remove('on'); crosshairEl.style.display = 'none'; crosshairLbl.style.display = 'none'; hoverEl.style.display = 'none'; } if (S.ruler.active) toggleRuler(); }
   function showPopup(block, mx, my) { var info = block.info; var lbl = info ? escHtml(info.label) : '—'; var meta = ''; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info.label; } else { meta = 'Слой: <b>Отражаемость</b><br>Порог: ≥' + info.v + ' dBZ<br>Категория: ' + info.label; } } else { meta = 'Слой: <b>Явления</b><br>' + info.label; } } else { meta = 'Нет данных'; } popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color + '"></div><div class="popup-label">' + lbl + '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>'; popupEl.style.display = 'block'; popupEl.classList.remove('popup-in'); void popupEl.offsetWidth; popupEl.classList.add('popup-in'); var px2 = mx + 16, py2 = my - 55; if (px2 + 230 > innerWidth - 8) px2 = mx - 246; if (py2 < 8) py2 = 8; if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118; popupEl.style.left = px2 + 'px'; popupEl.style.top = py2 + 'px'; popupVisible = true; }
   function hidePopup() { popupEl.style.display = 'none'; popupVisible = false; }
-  map.on('mousemove', function(e) { if (crosshairMode) return; var p = e.containerPoint, block = getBlockAt(p.x, p.y); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none'; });
+  map.on('mousemove', function(e) { if (crosshairMode) { requestAnimationFrame(updateCrosshair); return; } var p = e.containerPoint, block = getBlockAt(p.x, p.y); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none'; });
   map.on('click', function(e) { if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint, block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
 
   // ─── МОДАЛЬНОЕ ОКНО ПАЛИТР ──────────────────────────────
@@ -264,6 +292,45 @@
   deletePaletteBtn.addEventListener('click', function() { var list = palettes[currentLayerForModal].list; var idx = palettes[currentLayerForModal].activeIdx; if (idx >= list.length) return; if (list[idx].builtin) { toast('Нельзя удалить встроенную палитру'); return; } if (confirm('Удалить активную палитру "' + list[idx].name + '"?')) { list.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } });
   $('btn-palettes').addEventListener('click', openModal);
 
+  // ─── ПРОЗРАЧНОСТЬ, ТЕМА, СПРАВКА ─────────────────────────
+  var opacitySlider = $('opacity-slider');
+  var opacityVal = $('opacity-val');
+  if (opacitySlider) {
+    opacitySlider.addEventListener('input', function() {
+      var val = parseInt(this.value);
+      canvas.style.opacity = val / 100;
+      opacityVal.textContent = val + '%';
+    });
+  }
+
+  var helpModal = $('help-modal');
+  var helpClose = $('help-close');
+  if ($('btn-help')) {
+    $('btn-help').addEventListener('click', function() {
+      if (helpModal) helpModal.classList.add('open');
+    });
+  }
+  if (helpClose) {
+    helpClose.addEventListener('click', function() {
+      if (helpModal) helpModal.classList.remove('open');
+    });
+  }
+
+  if ($('btn-theme')) {
+    $('btn-theme').addEventListener('click', function() {
+      document.body.classList.toggle('light-theme');
+      var isLight = document.body.classList.contains('light-theme');
+      toast(isLight ? 'Светлая тема включена' : 'Темная тема включена');
+      if (map.hasLayer(darkTileLayer)) {
+        map.removeLayer(darkTileLayer);
+        lightTileLayer.addTo(map);
+      } else {
+        map.removeLayer(lightTileLayer);
+        darkTileLayer.addTo(map);
+      }
+    });
+  }
+
   // ─── ИНИЦИАЛИЗАЦИЯ ─────────────────────────────────────────
   loadPalettesFromStorage();
   buildLegend();
@@ -288,10 +355,11 @@
   $('legend-header').addEventListener('click', toggleLegend);
 
   var smoothSlider = $('smooth-strength');
-  var smoothVal = $('smooth-val');
-  smoothSlider.addEventListener('input', function() { S.smoothStrength = parseInt(this.value); smoothVal.textContent = S.smoothStrength; if (S.smooth) { S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast('Сила сглаживания: ' + S.smoothStrength); } });
+  var smoothValEl = $('smooth-val');
+  smoothSlider.addEventListener('input', function() { S.smoothStrength = parseInt(this.value); smoothValEl.textContent = S.smoothStrength; if (S.smooth) { S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast('Сила сглаживания: ' + S.smoothStrength); } });
 
   document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { if (crosshairMode) { toggleCrosshair(); return; } if (S.ruler.active) { toggleRuler(); return; } if (modal.classList.contains('open')) { closeModal(); return; } } });
+  map.on('zoomstart', function() { if (crosshairMode) hoverEl.style.display = 'none'; });
   map.on('move moveend zoomend', function() { if (crosshairMode) updateCrosshair(); });
   window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
 
@@ -299,73 +367,8 @@
   window.openModal = openModal;
   window.toggleLayer = toggleLayer;
 
+  // Пульс авторизации
+  setInterval(() => { fetch('/api/auth?action=heartbeat', { method: 'POST' }).catch(()=>{}); }, 15000);
+
   console.log('2×2 Радар загружен.');
-    // ─── ПРОЗРАЧНОСТЬ СЛОЯ ─────────────────────────────────
-  var opacitySlider = $('opacity-slider');
-  var opacityVal = $('opacity-val');
-  if (opacitySlider) {
-    opacitySlider.addEventListener('input', function() {
-      var val = parseInt(this.value);
-      canvas.style.opacity = val / 100;
-      opacityVal.textContent = val + '%';
-    });
-  }
-
-  // ─── МОДАЛЬНОЕ ОКНО СПРАВКИ ────────────────────────────
-  var helpModal = $('help-modal');
-  var helpClose = $('help-close');
-  if ($('btn-help')) {
-    $('btn-help').addEventListener('click', function() {
-      if (helpModal) helpModal.classList.add('open');
-    });
-  }
-  if (helpClose) {
-    helpClose.addEventListener('click', function() {
-      if (helpModal) helpModal.classList.remove('open');
-    });
-  }
-
-  // ─── ПЕРЕКЛЮЧЕНИЕ ТЕМЫ ─────────────────────────────────
-  if ($('btn-theme')) {
-    $('btn-theme').addEventListener('click', function() {
-      document.body.classList.toggle('light-theme');
-      var isLight = document.body.classList.contains('light-theme');
-      toast(isLight ? 'Светлая тема включена' : 'Темная тема включена');
-      
-      // Меняем подложку карты в зависимости от темы
-      if (map.hasLayer(darkTileLayer)) {
-        map.removeLayer(darkTileLayer);
-        lightTileLayer.addTo(map);
-      } else {
-        map.removeLayer(lightTileLayer);
-        darkTileLayer.addTo(map);
-      }
-    });
-  }
-
-  // ─── ДОБАВИТЬ СЛОИ КАРТЫ ДЛЯ ТЕМЫ ──────────────────────
-  // Находим текущий слой и создаем светлый
-  var darkTileLayer = null;
-  var lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20 });
-  
-  map.eachLayer(function(layer) {
-    if (layer instanceof L.TileLayer) {
-      darkTileLayer = layer;
-    }
-  });
-
-  // ─── УЛУЧШЕНИЕ РАБОТЫ ПРИЦЕЛА ──────────────────────────
-  // Обновляем прицел сразу при движении мыши, если он включен
-  map.on('mousemove', function(e) {
-    if (crosshairMode) {
-      requestAnimationFrame(updateCrosshair);
-    }
-  });
-
-  // Принудительно обновляем прицел при изменении масштаба
-  map.on('zoomstart', function() {
-    if (crosshairMode) {
-      hoverEl.style.display = 'none';
-    }
-  });
 })();
