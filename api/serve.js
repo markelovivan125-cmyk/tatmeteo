@@ -1,6 +1,7 @@
 import { Redis } from '@upstash/redis';
 import fs from 'fs';
 import path from 'path';
+import { parse } from 'url';
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -8,7 +9,7 @@ const redis = new Redis({
 });
 
 export default async function handler(req, res) {
-  // 1. Проверка авторизации
+  // 1. Проверка авторизации по Redis
   const cookies = req.headers.cookie || '';
   const passMatch = cookies.match(/auth_pass=([^;]+)/);
   const sidMatch = cookies.match(/auth_sid=([^;]+)/);
@@ -23,42 +24,35 @@ export default async function handler(req, res) {
     }
   }
 
+  // Если не авторизован — выкидываем на страницу входа
   if (!isAuth) {
     res.writeHead(302, { Location: '/login.html' });
     res.end();
     return;
   }
 
-  // 2. Определение запрошенного файла
-  let reqPath = req.url;
+  // 2. Надежное извлечение пути к файлу
+  const parsedUrl = parse(req.url, true);
+  let reqPath = parsedUrl.query.path || '';
   
-  // Достаем путь из параметра ?path=
-  if (reqPath.includes('?path=')) {
-    reqPath = reqPath.split('?path=')[1];
-  } else if (reqPath === '/' || reqPath === '/api/serve') {
+  // Если путь пустой (зашли на главную) — отдаем index.html
+  if (!reqPath || reqPath === '/') {
     reqPath = 'index.html';
   }
   
-  reqPath = reqPath.split('?')[0]; // Убираем остальные параметры
   reqPath = decodeURIComponent(reqPath);
-  
-  // Очищаем от слешей в начале и конце
-  reqPath = reqPath.replace(/^\/+|\/+$/g, '');
-  reqPath = reqPath.replace(/\.\.\//g, ''); // Защита от выхода из папки
-
-  // ЕСЛИ ПУСТЬ ПУСТОЙ - ОТДАЕМ INDEX.HTML
-  if (reqPath === '' || reqPath === '/') {
-    reqPath = 'index.html';
-  }
+  // Убираем слеши в начале и защищаемся от выхода за пределы папки
+  reqPath = reqPath.replace(/^\/+/, '').replace(/\.\.\//g, '');
 
   const filePath = path.join(process.cwd(), 'protected', reqPath);
   
   try {
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      res.status(404).send(`404: File Not Found<br>Искал здесь: ${filePath}`);
+      res.status(404).send('404: File Not Found');
       return;
     }
 
+    // 3. Отдаем файл с правильными заголовками
     const ext = path.extname(filePath);
     let contentType = 'text/html; charset=utf-8';
     if (ext === '.js') contentType = 'text/javascript; charset=utf-8';
