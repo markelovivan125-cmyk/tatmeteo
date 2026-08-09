@@ -443,4 +443,60 @@
 
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
   console.log('2×2 Радар загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
+  /* ─── АДАПТИВ ДЛЯ ТЕЛЕФОНОВ ─── */
+@media (max-width: 768px) {
+  /* Верхняя панель */
+  #ctrl { 
+    top: 8px; 
+    padding: 4px; 
+    gap: 2px;
+    border-radius: 12px;
+    max-width: calc(100vw - 16px);
+  }
+  .btn { 
+    padding: 5px 8px; 
+    font-size: 10px; 
+    border-radius: 6px;
+  }
+  .icon-btn { 
+    padding: 5px 6px; 
+    font-size: 12px; 
+  }
+  /* Скрываем разделители на мобильных */
+  .sep { display: none; }
+  
+  /* Таймлайн */
+  #tl { 
+    bottom: 8px; 
+    padding: 6px 10px; 
+    border-radius: 12px;
+    width: calc(100vw - 16px);
+    gap: 8px;
+  }
+  #playbtn { width: 28px; height: 28px; font-size: 12px; }
+  #b-minus1h, #b-minus10m, #b-plus10m { padding: 3px 6px; font-size: 9px; }
+  
+  /* Легенда */
+  #legend { 
+    bottom: 60px; 
+    right: 8px; 
+    left: 8px; 
+    width: auto; 
+    min-width: 0;
+    max-height: 30vh;
+    padding: 10px;
+  }
+  .li { font-size: 10px; }
+  .lsq { width: 10px; height: 10px; }
+  
+  /* Модальные окна */
+  .modal-content { 
+    width: 95%; 
+    padding: 16px; 
+    border-radius: 12px; 
+    max-height: 90vh; 
+  }
+  .create-form .row { flex-wrap: wrap; }
+  .create-form .row input[type="number"] { width: 60px; }
+}
 })();
