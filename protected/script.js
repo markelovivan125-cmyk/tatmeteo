@@ -443,7 +443,7 @@
 
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
   console.log('2×2 Радар загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
-    // ─── МОЛНИИ BLITZORTUNG ─────────────────────────────────
+   // ─── МОЛНИИ BLITZORTUNG ─────────────────────────────────
   var lightningLayer = L.layerGroup().addTo(map);
   var lightningActive = false;
   var lightningInterval = null;
@@ -456,16 +456,24 @@
 
   async function fetchLightning() {
     try {
-      // Получаем границы видимой карты
       var b = map.getBounds();
       var url = `/api/lightning?minLat=${b.getSouth()}&maxLat=${b.getNorth()}&minLon=${b.getWest()}&maxLon=${b.getEast()}`;
       
       const res = await fetch(url, { cache: 'no-store' });
       const strikes = await res.json();
+      
+      // Если сервер вернул ошибку, показываем её
+      if (strikes.error) {
+        toast('⚠️ Ошибка молний: ' + strikes.error);
+        return;
+      }
+
       lightningLayer.clearLayers();
       
+      // Если молний нет, просто ничего не рисуем
+      if (strikes.length === 0) return;
+      
       strikes.forEach(function(strike) {
-        // Сервер возвращает [lat, lon]
         var lat = strike[0];
         var lon = strike[1];
         
@@ -481,6 +489,7 @@
         }
       });
     } catch (e) {
+      toast('⚠️ Сбой сети при загрузке молний');
       console.error('Lightning fetch error:', e);
     }
   }
@@ -494,7 +503,6 @@
         lightningLayer.addTo(map);
         fetchLightning();
         lightningInterval = setInterval(fetchLightning, 60000); // Обновление каждую минуту
-        // Обновляем при перемещении карты
         map.on('moveend', fetchLightning);
         toast('Молнии включены (Blitzortung)');
       } else {
@@ -507,7 +515,6 @@
     }
   }
   
-  // Назначаем на кнопку, если она есть
   var btnLightning = document.querySelector('#btn-lightning');
   if (btnLightning) btnLightning.addEventListener('click', toggleLightning);
 })();
