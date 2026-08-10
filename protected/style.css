@@ -56,6 +56,10 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 #restore-tl:active { transform: translateX(-50%) scale(0.96); }
 
 #ctrl { top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 6px; flex-wrap: wrap; max-width: calc(100vw - 32px); }
+/* Внутренняя обёртка тулбара: на десктопе просто flex с переносом,
+   на мобиле — горизонтальный скролл (см. media), а #ctrl остаётся overflow:visible,
+   чтобы дропдауны слоёв/каналов не обрезались */
+#ctrl-scroll { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-width: 0; }
 /* Кнопки: единый transition по токенам + отклик на нажатие (transform: scale) */
 .btn { background: transparent; border: none; color: var(--text-dim); padding: 8px 14px; border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; white-space: nowrap; transition: background-color var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
 .btn:hover { background: rgba(255, 255, 255, 0.05); color: var(--text); }
@@ -303,10 +307,12 @@ body { transition: background-color 280ms var(--ease-in-out), color 280ms var(--
 
 /* ─── АДАПТИВ ДЛЯ ТЕЛЕФОНОВ ─── */
 @media (max-width: 768px) {
-  /* Тулбар: один ряд с горизонтальным скроллом — карта не загорожена 2–3 рядами кнопок.
-     Выбрано вместо группировки «⋯»: ноль JS-перестановок DOM, все обработчики целы */
-  #ctrl { top: 8px; padding: 4px; gap: 2px; border-radius: var(--radius-md); max-width: calc(100vw - 16px); flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  #ctrl::-webkit-scrollbar { display: none; }
+  /* Тулбар: ФИКС бага «дропдаун не открывается» — overflow-x:auto на #ctrl обрезал
+     абсолютные дропдауны. Скролл перенесён на внутренний #ctrl-scroll, сам #ctrl visible */
+  #ctrl { top: 8px; padding: 4px; gap: 2px; border-radius: var(--radius-md); max-width: calc(100vw - 16px); flex-wrap: nowrap; overflow: visible; justify-content: flex-start; }
+  #ctrl-scroll { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  #ctrl-scroll::-webkit-scrollbar { display: none; }
+  #layers-wrapper, #channel-wrapper { flex-shrink: 0; }
   .btn { padding: 6px 9px; font-size: 10px; border-radius: 6px; flex-shrink: 0; }
   .icon-btn { padding: 6px 7px; font-size: 12px; min-width: 32px; }
   .sep { display: none; }
@@ -351,3 +357,22 @@ body.map-drag #ctrl, body.map-drag #legend, body.map-drag #tl, body.map-drag #db
   .dd-item { min-height: 40px; display: flex; align-items: center; }
   #playbtn { min-width: 40px; min-height: 40px; }
 }
+
+/* ═══ Этап 3: палитры спутника, скрытие dBZ ═══ */
+
+/* Селект канала в модалке палитр — в стиле glass-инпутов */
+#sat-pal-ch-row { margin-bottom: 16px; }
+#sat-pal-ch-row label { font-size: 10px; color: var(--text-dim); display: block; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 6px; }
+#sat-pal-ch { width: 100%; padding: 8px 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); color: var(--text); font-size: 13px; font-family: inherit; outline: none; cursor: pointer; transition: border-color var(--dur-base) var(--ease-out); }
+#sat-pal-ch:focus { border-color: var(--accent); }
+#sat-pal-ch option { background: #22242e; color: #fff; }
+#sat-pal-note { font-size: 10px; color: var(--text-dim); margin-top: 6px; font-weight: 600; }
+body.light-theme #sat-pal-ch { background: rgba(255,255,255,0.5); color: #000; }
+body.light-theme #sat-pal-ch option { background: #fff; color: #000; }
+
+/* Контрол прозрачности неактивен при скрытом dBZ */
+#opacity-control.disabled { opacity: 0.4; pointer-events: none; transition: opacity var(--dur-base) var(--ease-out); }
+
+/* Легенда при скрытом слое dBZ — приглушена */
+#legend.dbz-off #lbody { opacity: 0.35; }
+#legend.dbz-off #ltitle::after { content: ' · скрыт'; color: var(--text-dim); }
