@@ -92,11 +92,47 @@
     frameI: 0, frames: [], cache: new Map(), pending: new Set(), failed: new Set(),
     cacheMax: (IS_MOBILE ? 130 : 400), loadN: 0, manualTime: false, legendVis: true, smooth: false, smoothStrength: 1,
     fade: { active: false, start: 0, duration: 300, alpha: 1 },
+    dbzVisible: true, /* показ слоя осадков (кнопка-«глаз») */
     pxLevels: [0.5, 1, 2, 4], pxIndex: 1,
     ruler: { active: false, points: [], markers: [], polyline: null, label: null, segmentLabels: [] }
   };
   S.px = S.pxLevels[S.pxIndex];
-  var palettes = { radar: { list: [], activeIdx: 0 }, wx: { list: [], activeIdx: 0 } };
+  var palettes = { radar: { list: [], activeIdx: 0 }, wx: { list: [], activeIdx: 0 }, sat: { byChannel: {} } };
+  /* ─── Палитры спутника: по одной корзине на канал (palettes.sat.byChannel[chId] = {list, activeIdx}).
+     Фасад .list/.activeIdx через геттеры указывает на канал, выбранный в модалке (satModalChId),
+     поэтому ВЕСЬ существующий код модалки (список/создание/удаление/экспорт) работает без правок ─── */
+  var satModalChId = 'ir108';
+  Object.defineProperty(palettes.sat, 'list', {
+    get: function() { return satBucket(satModalChId).list; },
+    set: function(v) { satBucket(satModalChId).list = v; }
+  });
+  Object.defineProperty(palettes.sat, 'activeIdx', {
+    get: function() { return satBucket(satModalChId).activeIdx; },
+    set: function(v) { satBucket(satModalChId).activeIdx = v; }
+  });
+  /* Корзина палитр канала: создаётся лениво, всегда начинается со встроенных */
+  function satBucket(chId) {
+    var bc = palettes.sat.byChannel;
+    if (!bc[chId]) {
+      var ch = null;
+      for (var i = 0; i < SAT_CHANNELS.length; i++) if (SAT_CHANNELS[i].id === chId) { ch = SAT_CHANNELS[i]; break; }
+      var builtins = BUILTIN_SAT[chId];
+      if (!builtins) {
+        /* RGB-канал: палитра только для легенды (тайлы уже цветные, реколоризация не применяется) */
+        var rows = (ch && ch.legend && ch.legend.rows) || [];
+        var items = rows.map(function(r, j) { var c = hexToRgb(r[0]) || { r: 128, g: 128, b: 128 }; return { v: (rows.length - j) * 40, r: [c.r, c.g, c.b], l: r[1] }; });
+        builtins = [{ name: 'Стандарт (цветной канал)', items: items, builtin: true, noRecolor: true, legendOnly: true }];
+      }
+      bc[chId] = { list: builtins.slice(), activeIdx: 0 };
+    }
+    return bc[chId];
+  }
+  /* Активная палитра канала, который сейчас на карте */
+  function satActivePalette() {
+    var b = satBucket(SAT_CHANNELS[satChIdx].id);
+    if (b.activeIdx >= b.list.length) b.activeIdx = 0;
+    return b.list[b.activeIdx] || null;
+  }
 
   var eumetsatLayer = null;
   var satOldLayer = null;      /* предыдущий слой — снимается после загрузки нового (без «чёрной вспышки») */
@@ -107,25 +143,165 @@
      day:true — канал информативен только в светлое время суток.
      legend: grad — градиентная шкала, rows — дискретные строки ─── */
   var SAT_CHANNELS = [
-    { id: 'ir108',       label: 'IR 10.8 (ИК)',        wms: 'msg_fes:ir108',            legend: { grad: ['#ffffff', '#999999', '#222222'], rows: [['#ffffff', 'Очень холодные вершины (грозы)'], ['#999999', 'Облака среднего яруса'], ['#333333', 'Тепло / земля / море']] } },
-    { id: 'wv062',       label: 'WV 6.2 (водяной пар)', wms: 'msg_fes:wv062',           legend: { grad: ['#ffffff', '#888888', '#1a1a1a'], rows: [['#ffffff', 'Влажная верхняя тропосфера'], ['#333333', 'Сухой воздух']] } },
-    { id: 'vis006',      label: 'VIS 0.6 (видимый)',    wms: 'msg_fes:vis006', day: true, legend: { rows: [['#ffffff', 'Яркие облака / снег'], ['#888888', 'Тонкая облачность'], ['#222222', 'Поверхность (день)']] } },
+    { id: 'ir108', gray: true, label: 'IR 10.8 (ИК)',        wms: 'msg_fes:ir108',            legend: { grad: ['#ffffff', '#999999', '#222222'], rows: [['#ffffff', 'Очень холодные вершины (грозы)'], ['#999999', 'Облака среднего яруса'], ['#333333', 'Тепло / земля / море']] } },
+    { id: 'wv062', gray: true, label: 'WV 6.2 (водяной пар)', wms: 'msg_fes:wv062',           legend: { grad: ['#ffffff', '#888888', '#1a1a1a'], rows: [['#ffffff', 'Влажная верхняя тропосфера'], ['#333333', 'Сухой воздух']] } },
+    { id: 'vis006', gray: true, label: 'VIS 0.6 (видимый)',    wms: 'msg_fes:vis006', day: true, legend: { rows: [['#ffffff', 'Яркие облака / снег'], ['#888888', 'Тонкая облачность'], ['#222222', 'Поверхность (день)']] } },
     { id: 'rgb_natural', label: 'Натуральные цвета',    wms: 'msg_fes:rgb_natural', day: true, legend: { rows: [['#f5f5f5', 'Водяные облака'], ['#7fd4e6', 'Лёд / снег (циан)'], ['#3d7a3d', 'Растительность']] } },
     { id: 'rgb_microphysics', label: 'Микрофизика облаков', wms: 'msg_fes:rgb_microphysics', legend: { rows: [['#d4553d', 'Мощные капельные облака'], ['#e6d44f', 'Тонкие перистые'], ['#4f66e6', 'Ледяные вершины']] } },
     { id: 'rgb_convection', label: 'Конвекция',         wms: 'msg_fes:rgb_convection', legend: { rows: [['#e6e64f', 'Сильная конвекция (жёлтое)'], ['#b34fe6', 'Развивающиеся ячейки'], ['#4f9ae6', 'Зрелые наковальни']] } },
     { id: 'rgb_fog',     label: 'Туман (ночь)',         wms: 'msg_fes:rgb_fog',         legend: { rows: [['#4fe67a', 'Туман / низкая облачность'], ['#e64f4f', 'Плотные облака'], ['#3d3d80', 'Ясно (ночь)']] } },
     { id: 'rgb_dust',    label: 'Пыль',                 wms: 'msg_fes:rgb_dust',        legend: { rows: [['#e654c8', 'Пыль (розовое)'], ['#c8a03c', 'Сухой воздух'], ['#5a78b4', 'Облака']] } },
     { id: 'rgb_airmass', label: 'Воздушные массы',      wms: 'msg_fes:rgb_airmass',     legend: { rows: [['#4fb4e6', 'Холодная ВМ (голубое)'], ['#4fe6b4', 'Тёплая ВМ (зелёное)'], ['#b44fe6', 'Стратосферное вторжение']] } },
-    { id: 'cth',         label: 'Высота вершин облаков', wms: 'msg_fes:cth',            legend: { rows: [['#d4553d', 'Очень высокие (>12 км)'], ['#e6d44f', 'Средние (5–8 км)'], ['#4f66e6', 'Низкие (<3 км)']] } },
+    { id: 'cth', gray: true, label: 'Высота вершин облаков', wms: 'msg_fes:cth',            legend: { rows: [['#d4553d', 'Очень высокие (>12 км)'], ['#e6d44f', 'Средние (5–8 км)'], ['#4f66e6', 'Низкие (<3 км)']] } },
     { id: 'fire',        label: 'Пожары',               wms: 'msg_fes:fire',            legend: { rows: [['#ff3d3d', 'Активный очаг'], ['#ffb43d', 'Вероятный очаг']] } },
     { id: 'rdt',         label: 'Грозы (RDT)',          wms: 'msg_fes:rdt',             legend: { rows: [['#ff3d3d', 'Зрелая грозовая ячейка'], ['#ffb43d', 'Развивающаяся'], ['#ffe63d', 'Зарождающаяся']] } },
-    { id: 'gii_kindex',  label: 'K-индекс',             wms: 'msg_fes:gii_kindex',      legend: { rows: [['#d4553d', 'K > 35 (высокая неустойчивость)'], ['#e6d44f', 'K 25–35 (умеренная)'], ['#4f66e6', 'K < 25 (стабильно)']] } },
-    { id: 'gii_liftedindex', label: 'Lifted Index',     wms: 'msg_fes:gii_liftedindex', legend: { rows: [['#d4553d', 'LI < −4 (сильная неустойчивость)'], ['#e6d44f', 'LI −4…0 (умеренная)'], ['#4f66e6', 'LI > 0 (стабильно)']] } }
+    { id: 'gii_kindex', gray: true, label: 'K-индекс',             wms: 'msg_fes:gii_kindex',      legend: { rows: [['#d4553d', 'K > 35 (высокая неустойчивость)'], ['#e6d44f', 'K 25–35 (умеренная)'], ['#4f66e6', 'K < 25 (стабильно)']] } },
+    { id: 'gii_liftedindex', gray: true, label: 'Lifted Index',     wms: 'msg_fes:gii_liftedindex', legend: { rows: [['#d4553d', 'LI < −4 (сильная неустойчивость)'], ['#e6d44f', 'LI −4…0 (умеренная)'], ['#4f66e6', 'LI > 0 (стабильно)']] } }
   ];
+
+  /* ─── БЛОК C: встроенные палитры спутника (порог = яркость пикселя 0–255, шкала «v и выше») ───
+     noRecolor: показываем оригинальные тайлы (палитра — только легенда).
+     Цвета согласованы с тёмной темой сайта — спокойные, не кислотные. */
+  var BUILTIN_SAT = {
+    ir108: [
+      { name: 'Классический серый', builtin: true, noRecolor: true, items: [
+        { v: 230, r: [255, 255, 255], l: 'Грозовые вершины (< −55°C)' },
+        { v: 180, r: [214, 214, 218], l: 'Мощные облака (−40…−55°C)' },
+        { v: 120, r: [150, 150, 156], l: 'Средний ярус (−15…−40°C)' },
+        { v: 60,  r: [92, 92, 98],    l: 'Низкие облака (0…−15°C)' },
+        { v: 0,   r: [42, 42, 46],    l: 'Земля / море (> 0°C)' }] },
+      { name: 'Усиленный IR', builtin: true, items: [
+        { v: 245, r: [236, 120, 220], l: 'Экстрем. холод (< −70°C)' },
+        { v: 230, r: [178, 96, 226],  l: '−60…−70°C — овершуты' },
+        { v: 215, r: [104, 88, 222],  l: '−50…−60°C — мощная конвекция' },
+        { v: 200, r: [86, 140, 232],  l: '−40…−50°C' },
+        { v: 185, r: [96, 196, 202],  l: '−30…−40°C' },
+        { v: 168, r: [110, 188, 110], l: '−20…−30°C' },
+        { v: 150, r: [214, 200, 108], l: '−10…−20°C' },
+        { v: 130, r: [216, 148, 92],  l: '0…−10°C' },
+        { v: 105, r: [186, 106, 92],  l: 'Тёплая облачность' },
+        { v: 0,   r: [72, 72, 78],    l: 'Земля / море' }] }
+    ],
+    wv062: [
+      { name: 'Водяной пар', builtin: true, items: [
+        { v: 215, r: [240, 244, 248], l: 'Очень влажный верх тропосферы' },
+        { v: 180, r: [170, 196, 220], l: 'Влажно' },
+        { v: 145, r: [110, 144, 182], l: 'Умеренно' },
+        { v: 110, r: [82, 100, 140],  l: 'Суховато' },
+        { v: 70,  r: [96, 82, 90],    l: 'Сухой воздух' },
+        { v: 0,   r: [64, 50, 52],    l: 'Очень сухо (просадка)' }] },
+      { name: 'WV усиленный', builtin: true, items: [
+        { v: 220, r: [120, 220, 210], l: 'Насыщенные влажные зоны' },
+        { v: 185, r: [96, 170, 224],  l: 'Влажные языки' },
+        { v: 150, r: [96, 110, 170],  l: 'Фон' },
+        { v: 110, r: [140, 100, 110], l: 'Сухие вторжения' },
+        { v: 0,   r: [180, 120, 80],  l: 'Экстремально сухо' }] }
+    ],
+    vis006: [
+      { name: 'VIS контраст', builtin: true, items: [
+        { v: 220, r: [255, 255, 255], l: 'Яркие облака / снег' },
+        { v: 170, r: [206, 208, 212], l: 'Плотная облачность' },
+        { v: 120, r: [150, 152, 158], l: 'Тонкая облачность' },
+        { v: 70,  r: [96, 98, 104],   l: 'Дымка' },
+        { v: 0,   r: [40, 42, 46],    l: 'Поверхность' }] }
+    ],
+    cth: [
+      { name: 'Высота вершин', builtin: true, items: [
+        { v: 220, r: [214, 84, 78],   l: '> 12 км — экстремально высокие' },
+        { v: 180, r: [224, 156, 88],  l: '10–12 км' },
+        { v: 140, r: [222, 208, 110], l: '7–10 км' },
+        { v: 100, r: [116, 190, 120], l: '5–7 км' },
+        { v: 60,  r: [92, 148, 216],  l: '3–5 км' },
+        { v: 0,   r: [80, 96, 160],   l: '< 3 км — низкие' }] }
+    ],
+    gii_kindex: [
+      { name: 'Неустойчивость (K)', builtin: true, items: [
+        { v: 200, r: [214, 84, 78],   l: 'K > 35 — высокая' },
+        { v: 140, r: [224, 170, 92],  l: 'K 30–35 — значительная' },
+        { v: 90,  r: [222, 208, 110], l: 'K 25–30 — умеренная' },
+        { v: 0,   r: [104, 172, 116], l: 'K < 25 — стабильно' }] }
+    ],
+    gii_liftedindex: [
+      { name: 'Неустойчивость (LI)', builtin: true, items: [
+        { v: 200, r: [214, 84, 78],   l: 'LI < −6 — экстремальная' },
+        { v: 140, r: [224, 170, 92],  l: 'LI −4…−6 — сильная' },
+        { v: 90,  r: [222, 208, 110], l: 'LI 0…−4 — умеренная' },
+        { v: 0,   r: [104, 172, 116], l: 'LI > 0 — стабильно' }] }
+    ]
+  };
   var satChIdx = 0;
   try { var savedCh = localStorage.getItem('satChannel'); var fi = SAT_CHANNELS.findIndex(function(c) { return c.id === savedCh; }); if (fi >= 0) satChIdx = fi; } catch (e) {}
 
   function satIso(ts) { return new Date(ts * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'); }
+
+  /* ─── БЛОК A: устойчивая загрузка WMS ───
+     Эндпоинты: [0] — основной. Зеркало добавлять сюда строкой (например, региональный прокси);
+     при массовых ошибках клиент сам переключится на следующий. */
+  var SAT_WMS_ENDPOINTS = ['https://view.eumetsat.int/geoserver/wms'];
+  var satEndpointIdx = 0;
+
+  /* LRU-кэш готовых тайлов (dataURL по полному URL — включает канал и time).
+     Повторный кадр таймлайна/возврат на позицию = 0 сетевых запросов. */
+  var satTileCache = new Map(), SAT_CACHE_MAX = 200;
+  function satCacheSet(url, dataUrl) {
+    if (satTileCache.has(url)) satTileCache.delete(url);
+    else if (satTileCache.size >= SAT_CACHE_MAX) satTileCache.delete(satTileCache.keys().next().value);
+    satTileCache.set(url, dataUrl);
+  }
+
+  /* Кэш реколоризованных тайлов: ключ = url + сигнатура палитры */
+  var satRecolorCache = new Map(), SAT_RECOLOR_MAX = 150;
+
+  /* Пул загрузки: не более 6 одновременных WMS-запросов, остальные ждут в очереди */
+  var satQueue = [], satActiveReq = 0, SAT_MAX_PAR = 6;
+  function satPump() {
+    while (satActiveReq < SAT_MAX_PAR && satQueue.length) {
+      var job = satQueue.shift();
+      /* Тайл мог быть снят Leaflet'ом до старта загрузки (быстрое панорамирование) */
+      if (job.tile._satAborted) continue;
+      satActiveReq++;
+      job.tile._satCounted = true;
+      job.tile.src = job.url;
+    }
+  }
+  function satRelease(tile) {
+    if (tile._satCounted) { tile._satCounted = false; satActiveReq = Math.max(0, satActiveReq - 1); }
+    satPump();
+  }
+
+  /* Счётчики прогресса для чипа: ⏳ загружено/всего */
+  var satTilesTotal = 0, satTilesDone = 0;
+
+  /* Кастомный слой: createTile с отложенной установкой src (пул) + кэш.
+     _tileOnLoad/_tileOnError — приватный API Leaflet 1.9.4 (стабилен), сохраняет
+     события loading/load/tileerror, на которые завязан attachSatEvents. */
+  var SatWMS = L.TileLayer.WMS.extend({
+    createTile: function(coords, done) {
+      var tile = document.createElement('img');
+      var self = this;
+      L.DomEvent.on(tile, 'load', function() { satRelease(tile); self._tileOnLoad(done, tile); });
+      L.DomEvent.on(tile, 'error', function(e) { satRelease(tile); self._tileOnError(done, tile, e); });
+      tile.alt = ''; tile.setAttribute('role', 'presentation');
+      tile.crossOrigin = 'anonymous'; /* нужен для реколоризации (getImageData) и кэша */
+      var url = this.getTileUrl(coords);
+      tile._satUrl = url;
+      var cached = satTileCache.get(url);
+      if (cached) { /* мгновенно из кэша, LRU-обновление */
+        satCacheSet(url, cached);
+        tile._fromCache = true;
+        tile.src = cached;
+      } else {
+        satQueue.push({ tile: tile, url: url });
+        satPump();
+      }
+      return tile;
+    },
+    _removeTile: function(key) {
+      var t = this._tiles[key];
+      if (t && t.el) t.el._satAborted = true; /* не грузить снятые тайлы из очереди */
+      return L.TileLayer.WMS.prototype._removeTile.call(this, key);
+    }
+  });
 
   /* Создание WMS-слоя: канал + опционально время кадра (null = актуальный «LIVE» кадр) */
   function createEumetsatLayer(opacity, channel, ts) {
@@ -138,28 +314,94 @@
       attribution: '© EUMETSAT',
       opacity: opacity !== undefined ? opacity : 0.8,
       tileSize: 256,
-      maxZoom: 10 /* как у карты — не гонять WMS на бесполезных зумах */
+      maxZoom: 10,          /* как у карты — не гонять WMS на бесполезных зумах */
+      updateWhenIdle: false, /* обновление во время движения — карта «живее» */
+      keepBuffer: 2
     };
     if (ts) params.time = satIso(ts);
-    return L.tileLayer.wms('https://view.eumetsat.int/geoserver/wms', params);
+    return new SatWMS(SAT_WMS_ENDPOINTS[satEndpointIdx], params);
   }
 
-  /* Индикация загрузки/ошибок WMS + авто-retry упавших тайлов (макс. 2 попытки) */
+  /* ─── Реколоризация grayscale-тайла по палитре канала (через procQueue, ≤8мс/кадр) ─── */
+  function satPalSignature(pal) { return pal.name + '|' + pal.items.map(function(i) { return i.v + ':' + i.r.join(','); }).join(';'); }
+  function recolorSatTile(tile) {
+    var ch = SAT_CHANNELS[satChIdx];
+    if (!ch.gray) return;
+    var pal = satActivePalette();
+    if (!pal || pal.noRecolor || pal.legendOnly || !pal.items || !pal.items.length) return;
+    var key = tile._satUrl + '§' + satPalSignature(pal);
+    var hit = satRecolorCache.get(key);
+    /* Подмена src — тоже через очередь: гарантирует, что кэширование ОРИГИНАЛА
+       (задание поставлено раньше в tileload) успеет отработать до перекраски */
+    if (hit) { enqueueTile({ run: function() { if (!tile._satAborted) { tile._recolored = true; tile.src = hit; } } }); return; }
+    var items = pal.items; /* отсортированы по v убыв. */
+    enqueueTile({ run: function() {
+      try {
+        if (tile._satAborted) return;
+        var c = document.createElement('canvas'); c.width = c.height = 256;
+        var cc = c.getContext('2d');
+        cc.drawImage(tile, 0, 0, 256, 256);
+        var idd = cc.getImageData(0, 0, 256, 256), d = idd.data;
+        for (var i = 0; i < d.length; i += 4) {
+          if (!d[i + 3]) continue; /* прозрачное — не трогаем */
+          var v = (d[i] + d[i + 1] + d[i + 2]) / 3;
+          for (var j = 0; j < items.length; j++) {
+            if (v >= items[j].v) { d[i] = items[j].r[0]; d[i + 1] = items[j].r[1]; d[i + 2] = items[j].r[2]; break; }
+          }
+        }
+        cc.putImageData(idd, 0, 0);
+        var du = c.toDataURL();
+        if (satRecolorCache.size >= SAT_RECOLOR_MAX) satRecolorCache.delete(satRecolorCache.keys().next().value);
+        satRecolorCache.set(key, du);
+        tile._recolored = true;
+        tile.src = du;
+      } catch (err) { /* canvas tainted (нет CORS) — оставляем оригинал, без падения */ }
+    } });
+  }
+
+  /* Индикация загрузки/ошибок WMS + retry 1с→2с→4с (макс. 3) + fallback-эндпоинт */
+  var satFailStreak = 0;
   function attachSatEvents(lyr) {
     var tries = {};
-    lyr.on('loading', function() { if (lyr === eumetsatLayer) { satLoading = true; $('pulse').classList.add('busy'); satUpdateChip(); } });
+    lyr.on('loading', function() { if (lyr === eumetsatLayer) { satLoading = true; satTilesTotal = 0; satTilesDone = 0; $('pulse').classList.add('busy'); satUpdateChip(); } });
+    lyr.on('tileloadstart', function() { if (lyr === eumetsatLayer) { satTilesTotal++; satUpdateChip(); } });
+    lyr.on('tileload', function(e) {
+      if (lyr === eumetsatLayer && !e.tile._countedDone) { e.tile._countedDone = true; satTilesDone++; satFailStreak = 0; satUpdateChip(); }
+      /* Кэшируем оригинал (если это не data: из кэша) — лениво, через procQueue */
+      var t = e.tile;
+      if (!t._fromCache && !t._recolored && t._satUrl && t.src && t.src.indexOf('data:') !== 0) {
+        (function(tile) { enqueueTile({ run: function() {
+          try {
+            if (satTileCache.has(tile._satUrl)) return;
+            var c = document.createElement('canvas'); c.width = c.height = 256;
+            c.getContext('2d').drawImage(tile, 0, 0, 256, 256);
+            satCacheSet(tile._satUrl, c.toDataURL());
+          } catch (err) { /* нет CORS — кэш недоступен, тайлы всё равно показываются */ }
+        } }); })(t);
+      }
+      if (!t._recolored) recolorSatTile(t);
+    });
     lyr.on('load', function() { if (lyr === eumetsatLayer) { satLoading = false; $('pulse').classList.remove('busy'); satUpdateChip(); } });
     lyr.on('tileerror', function(e) {
       var k = e.coords.x + ':' + e.coords.y + ':' + e.coords.z;
       var n = tries[k] || 0;
-      if (n < 2) { /* повторная попытка с нарастающей паузой */
+      if (lyr === eumetsatLayer) satTilesDone++;
+      if (n < 3) { /* экспоненциальный retry: 1с → 2с → 4с */
         tries[k] = n + 1;
-        setTimeout(function() { if (map.hasLayer(lyr) && e.tile) e.tile.src = lyr.getTileUrl(e.coords); }, 900 * (n + 1));
+        setTimeout(function() { if (map.hasLayer(lyr) && e.tile && !e.tile._satAborted) e.tile.src = lyr.getTileUrl(e.coords); }, 1000 * Math.pow(2, n));
       } else {
+        satFailStreak++;
         if (lyr === eumetsatLayer) { satLoading = false; $('pulse').classList.remove('busy'); } /* не висим в .busy вечно */
         var now = Date.now();
         if (now - satErrToastTs > 30000) { satErrToastTs = now; toast('⚠️ Спутник недоступен — нажмите ↻ для повтора'); }
         satUpdateChip(true);
+        /* Fallback: 6+ полностью упавших тайлов подряд и есть зеркало → переключаемся */
+        if (satFailStreak >= 6 && SAT_WMS_ENDPOINTS.length > 1) {
+          satFailStreak = 0;
+          satEndpointIdx = (satEndpointIdx + 1) % SAT_WMS_ENDPOINTS.length;
+          toast('Переключение на резервный сервер спутника…');
+          setTimeout(function() { satApplyTime(true); }, 1000);
+        }
       }
     });
   }
@@ -185,12 +427,46 @@
       } else { initDefaultPalettes('wx'); }
     } catch (e) { initDefaultPalettes('radar'); initDefaultPalettes('wx'); }
 
+    /* Палитры спутника: ключ satPalettes = { chId: { custom: [...], activeIdx: n } }.
+       Встроенные не сериализуем — восстанавливаются из BUILTIN_SAT */
+    try {
+      var sp = JSON.parse(localStorage.getItem('satPalettes') || 'null');
+      if (sp && typeof sp === 'object') {
+        Object.keys(sp).forEach(function(chId) {
+          var b = satBucket(chId); var rec = sp[chId] || {};
+          var custom = Array.isArray(rec.custom) ? rec.custom.filter(function(p) { return p && !p.builtin && Array.isArray(p.items); }) : [];
+          b.list = b.list.filter(function(p) { return p.builtin; }).concat(custom);
+          b.activeIdx = (typeof rec.activeIdx === 'number' && rec.activeIdx >= 0 && rec.activeIdx < b.list.length) ? rec.activeIdx : 0;
+        });
+      }
+    } catch (e) {}
+
     if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0;
     if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0;
   }
-  function initDefaultPalettes(layer) { var items = layer === 'radar' ? BUILTIN_RADAR : BUILTIN_WX; var name = layer === 'radar' ? 'Стандартная (радар)' : 'Стандартная (явления)'; palettes[layer].list = [{ name: name, items: items, builtin: true }]; palettes[layer].activeIdx = 0; savePalettesToStorage(layer); }
-  function savePalettesToStorage(layer) { try { localStorage.setItem(layer + 'Palettes', JSON.stringify(palettes[layer].list)); } catch (e) {} }
-  function getCurrentPaletteItems() { var layer = S.layer; var list = palettes[layer].list; var idx = palettes[layer].activeIdx; if (!list || list.length === 0 || idx >= list.length) { initDefaultPalettes(layer); idx = 0; } return list[idx].items; }
+  function initDefaultPalettes(layer) { if (layer === 'sat') return; var items = layer === 'radar' ? BUILTIN_RADAR : BUILTIN_WX; var name = layer === 'radar' ? 'Стандартная (радар)' : 'Стандартная (явления)'; palettes[layer].list = [{ name: name, items: items, builtin: true }]; palettes[layer].activeIdx = 0; savePalettesToStorage(layer); }
+  function savePalettesToStorage(layer) {
+    try {
+      if (layer === 'sat') {
+        /* Сериализуем только пользовательские палитры по каналам */
+        var out = {};
+        Object.keys(palettes.sat.byChannel).forEach(function(chId) {
+          var b = palettes.sat.byChannel[chId];
+          out[chId] = { custom: b.list.filter(function(p) { return !p.builtin; }), activeIdx: b.activeIdx };
+        });
+        localStorage.setItem('satPalettes', JSON.stringify(out));
+        return;
+      }
+      localStorage.setItem(layer + 'Palettes', JSON.stringify(palettes[layer].list));
+    } catch (e) {}
+  }
+  function getCurrentPaletteItems() {
+    var layer = S.layer;
+    if (layer === 'sat') { var p = satActivePalette(); return (p && p.items) || []; } /* палитра активного канала */
+    var list = palettes[layer].list; var idx = palettes[layer].activeIdx;
+    if (!list || list.length === 0 || idx >= list.length) { initDefaultPalettes(layer); idx = 0; }
+    return list[idx].items;
+  }
 
   /* ─── Время: сетка и глубина истории зависят от слоя (радар 10 мин / спутник 15 мин) ─── */
   function stepSec() { return S.layer === 'sat' ? SAT_STEP : STEP; }
@@ -243,7 +519,8 @@
     var ch = SAT_CHANNELS[satChIdx];
     var live = S.ts >= nowTs();
     var tstr = new Date((live ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-    setChip('🛰 ' + ch.label + ' · ' + tstr + ' МСК' + (live ? ' (LIVE, ~15 мин задержка)' : '') + (satLoading ? ' · ⏳' : '') + (err ? ' · ⚠️' : '') + ' · © EUMETSAT');
+    var prog = satLoading ? ' · ⏳' + Math.min(satTilesDone, satTilesTotal) + '/' + satTilesTotal : '';
+    setChip('🛰 ' + ch.label + ' · ' + tstr + ' МСК' + (live ? ' (LIVE, ~15 мин задержка)' : '') + prog + (err ? ' · ⚠️' : '') + ' · © EUMETSAT');
   }
 
   /* ─── Применение времени/канала спутника: новый WMS-слой поверх, старый снимается
@@ -275,6 +552,7 @@
   }
 
   /* ─── Crossfade канваса радара при переключении radar↔sat (вместо резкого display) ─── */
+  function canvasShouldHide() { return S.layer === 'sat' || !S.dbzVisible; }
   function fadeCanvas(show) {
     var target = parseInt($('opacity-slider').value) / 100;
     if (REDUCE_MOTION) { canvas.style.display = show ? 'block' : 'none'; canvas.style.opacity = target; return; }
@@ -284,8 +562,31 @@
       setTimeout(function() { canvas.classList.remove('cfade'); }, 300);
     } else {
       canvas.classList.add('cfade'); canvas.style.opacity = 0;
-      setTimeout(function() { canvas.classList.remove('cfade'); if (S.layer === 'sat') canvas.style.display = 'none'; canvas.style.opacity = target; }, 280);
+      setTimeout(function() { canvas.classList.remove('cfade'); if (canvasShouldHide()) canvas.style.display = 'none'; canvas.style.opacity = target; }, 280);
     }
+  }
+
+  /* ─── БЛОК D: скрытие/показ слоя dBZ (кнопка-«глаз») ─── */
+  function applyDbzUI() {
+    var btn = $('btn-toggle-dbz');
+    if (!btn) return;
+    btn.textContent = S.dbzVisible ? '👁' : '🙈';
+    btn.title = S.dbzVisible ? 'Скрыть слой осадков' : 'Показать слой осадков';
+    btn.classList.toggle('on', !S.dbzVisible);
+    /* Слайдер прозрачности неактивен, пока слой скрыт */
+    var slider = $('opacity-slider');
+    if (S.layer !== 'sat') { slider.disabled = !S.dbzVisible; $('opacity-control').classList.toggle('disabled', !S.dbzVisible); }
+    /* Легенда приглушается + подпись «слой скрыт» в чипе (см. doRender) */
+    $('legend').classList.toggle('dbz-off', !S.dbzVisible && S.layer !== 'sat');
+  }
+  function toggleDbz() {
+    if (S.layer === 'sat') { toast('В режиме спутника слой dBZ не отображается'); return; }
+    S.dbzVisible = !S.dbzVisible;
+    fadeCanvas(S.dbzVisible); /* плавное затухание/проявление 250–300мс, reduced-motion — мгновенно */
+    applyDbzUI();
+    if (S.dbzVisible) schedRender(); else { hidePopup(); hoverEl.style.display = 'none'; }
+    saveViewDebounced();
+    toast(S.dbzVisible ? 'Слой осадков показан' : 'Слой осадков скрыт');
   }
 
   function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * (1 << z)); }
@@ -349,6 +650,7 @@
     var t0 = performance.now();
     while (procQueue.length && (performance.now() - t0) < 8) {
       var job = procQueue.shift();
+      if (job.run) { try { job.run(); } catch (e) {} continue; } /* универсальные задания (реколоризация спутника и т.п.) */
       if (S.ts !== job.sts || S.layer !== job.sl) continue; /* кадр уже неактуален */
       try {
         var result = processTile(job.img, job.spx, job.ssmooth, job.sstrength);
@@ -379,6 +681,8 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     if (S.layer === 'sat') { satUpdateChip(); return; }
+    /* Слой скрыт кнопкой-«глазом»: не тратим CPU на отрисовку */
+    if (!S.dbzVisible) { setChip((S.layer === 'radar' ? 'dBZ' : 'ОЯ') + ' · слой скрыт'); return; }
     if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; prevFrame.valid = false; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
     var alpha = S.fade.active ? S.fade.alpha : 1; var tiles = visTiles();
     /* Старый кадр гаснет под новым; снимок хранится в device-пикселях → рисуем с identity-матрицей */
@@ -398,7 +702,10 @@
   }
 
   map.on('move', schedRender); map.on('movestart', function() { prevFrame.valid = false; }); map.on('moveend zoomend', function() { if (S.layer !== 'sat') S.failed.clear(); schedRender(); });
-  function forceRefresh() { S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender(); }
+  function forceRefresh() {
+    if (S.layer === 'sat') { satRecolorCache.clear(); satApplyTime(true); return; } /* смена палитры спутника → перекрасить тайлы */
+    S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender();
+  }
   /* Вращение иконки ↻ — видимый статус обновления */
   function spinRefreshBtn() { var b = $('btn-refresh'); retrig(b, 'spinning'); setTimeout(function() { b.classList.remove('spinning'); }, 850); }
   function doRefresh() { 
@@ -480,9 +787,12 @@
     $('btn-layers-menu').textContent = 'Слои: ' + (S.layer === 'radar' ? 'dBZ' : (S.layer === 'wx' ? 'ОЯ' : 'Спутник'));
 
     stopPlay();
+    /* Смена слоя всегда возвращает видимость dBZ — предсказуемо для пользователя */
+    S.dbzVisible = true;
     if (S.layer === 'sat') {
       /* Спутник: канвас радара плавно гаснет, таймлайн ОСТАЁТСЯ (история WMS через time=) */
       fadeCanvas(false);
+      $('opacity-slider').disabled = false; $('opacity-control').classList.remove('disabled');
       $('channel-wrapper').style.display = 'block';
       S.manualTime = false; S.ts = nowTs();
       buildFrames(); updHUD();
@@ -502,8 +812,10 @@
       S.cache.clear(); S.pending.clear(); S.failed.clear();
       buildFrames(); forceRefresh();
     }
+    applyDbzUI();
     buildLegend(); hidePopup();
     if (S.ruler.active) toggleRuler();
+    saveViewDebounced();
   }
 
   /* ─── Выбор канала спутника ─── */
@@ -521,6 +833,7 @@
     buildLegend();
     satApplyTime(true);
     satUpdateChip();
+    saveViewDebounced();
   }
   function initChannelUI() {
     var dd = $('channel-dropdown');
@@ -539,10 +852,10 @@
   }
   initChannelUI();
 
-  function cyclePx() { if (S.layer === 'sat') return; S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); }
+  function cyclePx() { if (S.layer === 'sat') return; S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); saveViewDebounced(); }
   function updatePxLabel() { var resKm = (S.px * BASE_RES_KM); var label = resKm.toFixed(1) + ' км'; if (resKm === 1) label = '1x1 км'; if (resKm === 2) label = '2x2 км'; if (resKm === 4) label = '4x4 км'; if (resKm === 8) label = '8x8 км'; $('pxbtn').textContent = label; }
   /* Текст кнопок не меняем на «✓» — активность показывает состояние .on (без прыжков ширины) */
-  function toggleSmooth() { if (S.layer === 'sat') return; S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); ctrl.classList.add('active'); } else { btn.classList.remove('on'); ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); }
+  function toggleSmooth() { if (S.layer === 'sat') return; S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); ctrl.classList.add('active'); } else { btn.classList.remove('on'); ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); saveViewDebounced(); }
 
   function toggleRuler() { S.ruler.active = !S.ruler.active; var btn = $('btn-ruler'); if (S.ruler.active) { btn.classList.add('on'); toast('Клик — точка, двойной клик — завершить.'); map.on('click', rulerClick); map.on('dblclick', rulerFinish); if (crosshairMode) toggleCrosshair(); } else { btn.classList.remove('on'); map.off('click', rulerClick); map.off('dblclick', rulerFinish); clearRuler(); } }
   function rulerClick(e) { if (!S.ruler.active) return; var latlng = e.latlng; S.ruler.points.push(latlng); var marker = L.circleMarker(latlng, { radius: 5, color: '#5b8def', fillColor: '#fff', fillOpacity: 1, weight: 2, className: 'ruler-marker' }).addTo(map); S.ruler.markers.push(marker); updateRulerLine(); updateRulerLabels(); }
@@ -557,23 +870,44 @@
     if (S.layer === 'sat') {
       var ch = SAT_CHANNELS[satChIdx];
       setLegendTitle('СПУТНИК · ' + ch.label.toUpperCase());
-      var lg = ch.legend || {}; var idx = 0;
-      /* Градиентная шкала для grayscale-каналов (IR/WV): холодно → тепло */
-      if (lg.grad) {
-        var g = document.createElement('div'); g.className = 'lgrad';
-        g.style.background = 'linear-gradient(to right, ' + lg.grad.join(', ') + ')';
-        g.style.setProperty('--i', idx++); g.classList.add('li');
+      var idx = 0;
+      var pal = satActivePalette();
+      if (pal && pal.items && pal.items.length && !pal.legendOnly) {
+        /* Легенда из активной палитры канала: градиент по стопам (v по возрастанию) + строки */
+        var asc = pal.items.slice().sort(function(a, b) { return a.v - b.v; });
+        var g = document.createElement('div'); g.className = 'lgrad li';
+        g.style.background = 'linear-gradient(to right, ' + asc.map(function(it) { return 'rgb(' + it.r.join(',') + ')'; }).join(', ') + ')';
+        g.style.setProperty('--i', idx++);
         el.appendChild(g);
         var cap = document.createElement('div'); cap.className = 'li lgrad-cap'; cap.style.setProperty('--i', idx++);
-        cap.innerHTML = '<span>холодно</span><span>тепло</span>';
+        cap.innerHTML = '<span>тепло</span><span>холодно</span>';
         el.appendChild(cap);
+        pal.items.forEach(function(it) {
+          var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(idx++, 14));
+          var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + it.r.join(',') + ')';
+          var t = document.createElement('span'); t.textContent = it.l;
+          row.appendChild(sq); row.appendChild(t); el.appendChild(row);
+        });
+        if (pal.noRecolor) { var nr = document.createElement('div'); nr.className = 'li legend-note'; nr.style.setProperty('--i', Math.min(idx++, 14)); nr.textContent = 'Оригинальные тона канала'; el.appendChild(nr); }
+      } else {
+        /* Fallback: стандартная легенда канала (RGB-каналы и т.п.) */
+        var lg = ch.legend || {};
+        if (lg.grad) {
+          var g2 = document.createElement('div'); g2.className = 'lgrad li';
+          g2.style.background = 'linear-gradient(to right, ' + lg.grad.join(', ') + ')';
+          g2.style.setProperty('--i', idx++);
+          el.appendChild(g2);
+          var cap2 = document.createElement('div'); cap2.className = 'li lgrad-cap'; cap2.style.setProperty('--i', idx++);
+          cap2.innerHTML = '<span>холодно</span><span>тепло</span>';
+          el.appendChild(cap2);
+        }
+        (lg.rows || []).forEach(function(r) {
+          var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(idx++, 14));
+          var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = r[0];
+          var t = document.createElement('span'); t.textContent = r[1];
+          row.appendChild(sq); row.appendChild(t); el.appendChild(row);
+        });
       }
-      (lg.rows || []).forEach(function(r) {
-        var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(idx++, 14));
-        var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = r[0];
-        var t = document.createElement('span'); t.textContent = r[1];
-        row.appendChild(sq); row.appendChild(t); el.appendChild(row);
-      });
       if (ch.day) { var d = document.createElement('div'); d.className = 'li legend-note'; d.style.setProperty('--i', Math.min(idx++, 14)); d.textContent = '☀️ Канал информативен только днём'; el.appendChild(d); }
       /* Обязательная атрибуция по лицензии EUMETSAT */
       var attr = document.createElement('div'); attr.className = 'li legend-note'; attr.style.setProperty('--i', Math.min(idx++, 14)); attr.textContent = '© EUMETSAT'; el.appendChild(attr);
@@ -582,7 +916,7 @@
     var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; setLegendTitle(title); 
     items.forEach(function(p, i) { var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14)); var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
   }
-  function toggleLegend() { var lg = $('legend'), btn = $('toggle-legend-btn'); if (S.legendVis) { lg.classList.add('collapsed'); btn.innerHTML = '+'; } else { lg.classList.remove('collapsed'); btn.innerHTML = '−'; } S.legendVis = !S.legendVis; }
+  function toggleLegend() { var lg = $('legend'), btn = $('toggle-legend-btn'); if (S.legendVis) { lg.classList.add('collapsed'); btn.innerHTML = '+'; } else { lg.classList.remove('collapsed'); btn.innerHTML = '−'; } S.legendVis = !S.legendVis; saveViewDebounced(); }
   /* ─── Toast: отдельный элемент снизу по центру, fade+slide, очередь сообщений.
      Сигнатура toast(m) сохранена — все существующие вызовы работают ─── */
   var toastEl = document.createElement('div');
@@ -623,7 +957,7 @@
   function findPalEntry(r, g, b) { var items = getCurrentPaletteItems(), best = null, bd = 1e9; for (var i = 0; i < items.length; i++) { var p = items[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2], d = dr * dr + dg * dg + db * db; if (d < bd) { bd = d; best = p; } } return bd < 3000 ? { label: best.l, v: best.v } : null; }
   
   function getBlockAt(mx, my) { 
-    if (S.layer === 'sat') return null; 
+    if (S.layer === 'sat' || !S.dbzVisible) return null; /* скрытый dBZ — как sat: без прицела/попапа */
     var tiles = visTiles(); 
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], r = tileRect(t.x, t.y); 
@@ -660,7 +994,31 @@
   var lastFocused = null;
   function focusModal(m) { var mc = m.querySelector('.modal-content'); if (mc) { mc.setAttribute('tabindex', '-1'); mc.focus({ preventScroll: true }); } }
   function restoreFocus() { if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus(); lastFocused = null; }
-  function openModal() { lastFocused = document.activeElement; modal.classList.add('open'); focusModal(modal); currentLayerForModal = (S.layer === 'sat' ? 'radar' : S.layer); modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
+  /* ─── UI спутниковых палитр в модалке: селект канала + подсказка для RGB-каналов ─── */
+  var satPalChSelect = $('sat-pal-ch'), satPalChRow = $('sat-pal-ch-row'), satPalNote = $('sat-pal-note');
+  if (satPalChSelect) {
+    SAT_CHANNELS.forEach(function(ch) {
+      var opt = document.createElement('option');
+      opt.value = ch.id; opt.textContent = ch.label + (ch.gray ? '' : ' (цветной)');
+      satPalChSelect.appendChild(opt);
+    });
+    satPalChSelect.addEventListener('change', function() { satModalChId = this.value; syncSatPalUI(); renderPaletteList(); closeForm(); });
+  }
+  function syncSatPalUI() {
+    if (!satPalChRow) return;
+    var isSat = currentLayerForModal === 'sat';
+    satPalChRow.style.display = isSat ? 'block' : 'none';
+    /* Подпись поля порога: для спутника — яркость 0–255, для радара/ОЯ — дБZ */
+    if (entryVal) entryVal.placeholder = isSat ? '0–255' : 'дБZ';
+    if (!isSat) return;
+    if (satPalChSelect.value !== satModalChId) satPalChSelect.value = satModalChId;
+    var ch = null;
+    for (var i = 0; i < SAT_CHANNELS.length; i++) if (SAT_CHANNELS[i].id === satModalChId) { ch = SAT_CHANNELS[i]; break; }
+    satPalNote.textContent = (ch && !ch.gray)
+      ? 'Канал уже цветной — палитра применяется только к легенде'
+      : 'Порог = яркость пикселя 0–255 (255 — самое холодное/яркое)';
+  }
+  function openModal() { lastFocused = document.activeElement; modal.classList.add('open'); focusModal(modal); currentLayerForModal = S.layer; satModalChId = SAT_CHANNELS[satChIdx].id; syncSatPalUI(); modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
   function closeModal() { modal.classList.remove('open'); closeForm(); restoreFocus(); }
   function renderPaletteList() { var list = palettes[currentLayerForModal].list; var activeIdx = palettes[currentLayerForModal].activeIdx; var html = ''; list.forEach(function(p, idx) { var activeClass = idx === activeIdx ? 'active' : ''; var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : ''; var editBtn = p.builtin ? '' : '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>'; html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' + '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' + '<div>' + editBtn + (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') + '</div></div>'; }); paletteListContainer.innerHTML = html; paletteListContainer.querySelectorAll('.palette-item').forEach(function(el) { el.addEventListener('click', function(e) { if (e.target.classList.contains('del') || e.target.classList.contains('edit-btn')) return; var idx = parseInt(this.dataset.idx); palettes[currentLayerForModal].activeIdx = idx; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } }); }); paletteListContainer.querySelectorAll('.edit-btn').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); startEditingPalette(idx); }); }); paletteListContainer.querySelectorAll('.del').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); var list2 = palettes[currentLayerForModal].list; if (list2[idx].builtin) return; if (confirm('Удалить палитру "' + list2[idx].name + '"?')) { list2.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx = list2.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } }); }); }
   function startEditingPalette(idx) { var list = palettes[currentLayerForModal].list; if (idx < 0 || idx >= list.length) return; var pal = list[idx]; if (pal.builtin) { toast('Встроенную палитру нельзя редактировать'); return; } editingIndex = idx; newPalName.value = pal.name; tempEntries = pal.items.map(function(item) { return { val: item.v, color: '#' + item.r.map(function(c) { return c.toString(16).padStart(2, '0'); }).join(''), label: item.l, r: { r: item.r[0], g: item.r[1], b: item.r[2] } }; }); editingEntryIndex = -1; renderEntries(); createForm.classList.add('open'); savePaletteBtn.textContent = '💾 Обновить'; toast('Редактирование палитры "' + pal.name + '"'); }
@@ -670,12 +1028,12 @@
   function hexToRgb(hex) { var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null; }
   function savePalette() { var name = newPalName.value.trim() || 'Без названия'; if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; } var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; }); var items = sorted.map(function(e) { return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label }; }); if (editingIndex >= 0) { var list = palettes[currentLayerForModal].list; if (editingIndex >= list.length) { toast('Ошибка: палитра не найдена'); return; } if (list[editingIndex].builtin) { toast('Нельзя редактировать встроенную палитру'); return; } list[editingIndex].name = name; list[editingIndex].items = items; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" обновлена'); closeForm(); } else { var newPal = { name: name, items: items, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" сохранена'); closeForm(); } }
   function exportPalette() { var layer = currentLayerForModal || S.layer; var list = palettes[layer].list; var idx = palettes[layer].activeIdx; if (!list || list.length === 0 || idx >= list.length) { toast('Нет палитры для экспорта'); return; } var pal = list[idx]; var content = generatePalFile(pal.items, pal.name, layer); var blob = new Blob([content], { type: 'text/plain;charset=utf-8' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = (pal.name || 'palette') + '.pal'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('Палитра "' + pal.name + '" экспортирована'); }
-  function generatePalFile(items, name, layer) { var sorted = items.slice().sort(function(a, b) { return a.v - b.v; }); var lines = []; lines.push('Product: ' + (layer === 'radar' ? 'BR' : 'WX')); lines.push('Units: dBZ'); lines.push('Scale: 1'); lines.push('Offset: 0'); lines.push('Step: 5'); lines.push('RF: 0 0 0'); lines.push(''); for (var i = 0; i < sorted.length; i++) { var p = sorted[i]; var r = p.r[0], g = p.r[1], b = p.r[2]; lines.push('Color: ' + p.v + ' ' + r + ' ' + g + ' ' + b); } return lines.join('\n'); }
+  function generatePalFile(items, name, layer) { var sorted = items.slice().sort(function(a, b) { return a.v - b.v; }); var lines = []; lines.push('Product: ' + (layer === 'radar' ? 'BR' : (layer === 'sat' ? 'SAT' : 'WX'))); lines.push('Units: ' + (layer === 'sat' ? 'brightness' : 'dBZ')); lines.push('Scale: 1'); lines.push('Offset: 0'); lines.push('Step: 5'); lines.push('RF: 0 0 0'); lines.push(''); for (var i = 0; i < sorted.length; i++) { var p = sorted[i]; var r = p.r[0], g = p.r[1], b = p.r[2]; lines.push('Color: ' + p.v + ' ' + r + ' ' + g + ' ' + b); } return lines.join('\n'); }
   function loadPaletteFromFile(file) { var reader = new FileReader(); reader.onload = function(e) { try { var content = e.target.result; var data = parsePaletteFile(content); if (data) { var name = file.name.replace(/\.[^.]+$/, '') || 'Загруженная'; var newPal = { name: name, items: data, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра загружена'); } else { toast('Ошибка парсинга файла'); } } catch (err) { toast('Ошибка: ' + err.message); } }; reader.readAsText(file); }
   function parsePaletteFile(text) { try { var parsed = JSON.parse(text); if (Array.isArray(parsed) && parsed.length && parsed[0].v !== undefined && parsed[0].r && parsed[0].l) { return parsed; } } catch (e) {} var lines = text.split(/\r?\n/).filter(function(line) { return line.trim().length > 0; }); var items = []; var inTable = false; for (var i = 0; i < lines.length; i++) { var line = lines[i].trim(); if (/^ColorTable\s*\{/.test(line)) { inTable = true; continue; } if (/^\}/.test(line)) { inTable = false; continue; } if (!inTable) continue; var match = line.match(/Color\s*\[\s*([\d.]+)\s*\]\s*=\s*(rgb|gradient)\s*\(\s*([^)]+)\s*\)/i); if (match) { var v = parseFloat(match[1]); var type = match[2].toLowerCase(); var params = match[3].split(/\s*,\s*/).filter(function(s) { return s.length > 0; }); if (type === 'rgb' && params.length >= 3) { var r = parseInt(params[0]); var g = parseInt(params[1]); var b = parseInt(params[2]); if (!isNaN(r) && !isNaN(g) && !isNaN(b)) { items.push({ v: v, r: [r, g, b], l: '>= ' + v + ' dBZ' }); } } else if (type === 'gradient' && params.length >= 6) { var r2 = parseInt(params[1]), g2 = parseInt(params[2]), b2 = parseInt(params[3]); if (!isNaN(r2) && !isNaN(g2) && !isNaN(b2)) { items.push({ v: v, r: [r2, g2, b2], l: '>= ' + v + ' dBZ' }); } } } } if (items.length > 0) { items.sort(function(a, b) { return b.v - a.v; }); return items; } var colorLines = []; var product = null; for (var j = 0; j < lines.length; j++) { var line2 = lines[j].trim(); if (/^Product:/i.test(line2)) { product = line2; } if (/^Color:/i.test(line2)) { colorLines.push(line2); } } if (colorLines.length > 0) { var newItems = []; for (var k = 0; k < colorLines.length; k++) { var parts = colorLines[k].split(/\s+/); if (parts.length >= 5) { var val = parseFloat(parts[1]); var r3 = parseInt(parts[2]); var g3 = parseInt(parts[3]); var b3 = parseInt(parts[4]); if (!isNaN(val) && !isNaN(r3) && !isNaN(g3) && !isNaN(b3)) { newItems.push({ v: val, r: [r3, g3, b3], l: val + ' dBZ' }); } } } if (newItems.length > 0) { newItems.sort(function(a, b) { return b.v - a.v; }); return newItems; } } var csvItems = []; for (var m = 0; m < lines.length; m++) { var line3 = lines[m].trim(); var parts2 = line3.split(/\s*,\s*/); if (parts2.length >= 5) { var v2 = parseFloat(parts2[0]); if (isNaN(v2)) continue; var r4 = parseInt(parts2[1]), g4 = parseInt(parts2[2]), b4 = parseInt(parts2[3]); if (isNaN(r4) || isNaN(g4) || isNaN(b4)) continue; var label = parts2.slice(4).join(',').trim() || 'без метки'; csvItems.push({ v: v2, r: [r4, g4, b4], l: label }); } else { var m2 = line3.match(/^([\d.]+)\s+#([a-fA-F0-9]{6})\s+(.+)$/); if (m2) { var v3 = parseFloat(m2[1]); if (isNaN(v3)) continue; var rgb = hexToRgb('#' + m2[2]); if (!rgb) continue; csvItems.push({ v: v3, r: [rgb.r, rgb.g, rgb.b], l: m2[3].trim() }); } } } if (csvItems.length === 0) return null; csvItems.sort(function(a, b) { return b.v - a.v; }); return csvItems; }
 
   modalClose.addEventListener('click', closeModal);
-  modalTabs.forEach(function(btn) { btn.addEventListener('click', function() { currentLayerForModal = this.dataset.layer; modalTabs.forEach(function(b) { b.classList.toggle('active', b === btn); }); renderPaletteList(); closeForm(); }); });
+  modalTabs.forEach(function(btn) { btn.addEventListener('click', function() { currentLayerForModal = this.dataset.layer; modalTabs.forEach(function(b) { b.classList.toggle('active', b === btn); }); syncSatPalUI(); renderPaletteList(); closeForm(); }); });
   loadPaletteBtn.addEventListener('click', function() { fileInput.click(); });
   fileInput.addEventListener('change', function(e) { if (this.files && this.files[0]) { loadPaletteFromFile(this.files[0]); } this.value = ''; });
   exportPaletteBtn.addEventListener('click', exportPalette);
@@ -700,6 +1058,7 @@
       }
       opacityVal.textContent = val + '%';
       retrig(opacityVal, 'bump'); /* лёгкий отклик значения */
+      saveViewDebounced();
     });
   }
 
@@ -724,7 +1083,7 @@
       else { map.removeLayer(fromLayer); fromLayer.setOpacity(1); }
     })();
   }
-  if ($('btn-theme')) { $('btn-theme').addEventListener('click', function() { document.body.classList.toggle('light-theme'); var isLight = document.body.classList.contains('light-theme'); toast(isLight ? 'Светлая тема включена' : 'Тёмная тема включена'); if (map.hasLayer(darkTileLayer)) { swapBaseLayer(lightTileLayer, darkTileLayer); } else { swapBaseLayer(darkTileLayer, lightTileLayer); } }); }
+  if ($('btn-theme')) { $('btn-theme').addEventListener('click', function() { document.body.classList.toggle('light-theme'); var isLight = document.body.classList.contains('light-theme'); toast(isLight ? 'Светлая тема включена' : 'Тёмная тема включена'); if (map.hasLayer(darkTileLayer)) { swapBaseLayer(lightTileLayer, darkTileLayer); } else { swapBaseLayer(darkTileLayer, lightTileLayer); } saveViewDebounced(); }); }
 
   /* На таче приглушаем панели во время перетаскивания карты — карту видно целиком */
   if (IS_MOBILE) {
@@ -733,13 +1092,83 @@
     map.on('moveend', function() { clearTimeout(dragDimTmr); dragDimTmr = setTimeout(function() { document.body.classList.remove('map-drag'); }, 250); });
   }
 
-  loadPalettesFromStorage(); buildLegend(); buildFrames(); updHUD(); updatePxLabel(); schedRender();
+  /* ─── БЛОК E: сохранение и восстановление вида карты и параметров (ключ mapView) ─── */
+  function saveView() {
+    try {
+      var c = map.getCenter();
+      localStorage.setItem('mapView', JSON.stringify({
+        center: [+c.lat.toFixed(4), +c.lng.toFixed(4)],
+        zoom: map.getZoom(),
+        layer: S.layer,
+        satChannel: SAT_CHANNELS[satChIdx].id, /* единый источник — дублирует satChannel-ключ */
+        pxIndex: S.pxIndex,
+        smooth: S.smooth,
+        smoothStrength: S.smoothStrength,
+        opacity: parseInt($('opacity-slider').value) || 100,
+        theme: document.body.classList.contains('light-theme') ? 'light' : 'dark',
+        legendCollapsed: $('legend').classList.contains('collapsed'),
+        dbzVisible: S.dbzVisible
+      }));
+    } catch (e) {}
+  }
+  var saveViewTmr = null;
+  function saveViewDebounced() { clearTimeout(saveViewTmr); saveViewTmr = setTimeout(saveView, 300); }
+  map.on('moveend zoomend', saveViewDebounced);
+
+  /* Восстановление ДО первой тяжёлой отрисовки; время кадра не восстанавливаем — всегда LIVE */
+  function restoreView() {
+    var v = null;
+    try { v = JSON.parse(localStorage.getItem('mapView') || 'null'); } catch (e) {}
+    if (!v || typeof v !== 'object') return;
+    try {
+      /* Валидация: зум [3..10], координаты — конечные числа; иначе дефолт [57,55] z6 */
+      if (Array.isArray(v.center) && isFinite(v.center[0]) && isFinite(v.center[1]) && isFinite(v.zoom)) {
+        var z = Math.max(3, Math.min(10, Math.round(v.zoom)));
+        var la = Math.max(-85, Math.min(85, +v.center[0]));
+        var lo = Math.max(-180, Math.min(180, +v.center[1]));
+        map.setView([la, lo], z, { animate: false });
+      }
+      if (v.theme === 'light' && !document.body.classList.contains('light-theme')) {
+        document.body.classList.add('light-theme');
+        map.removeLayer(darkTileLayer); lightTileLayer.addTo(map); /* без анимации при старте */
+      }
+      if (typeof v.pxIndex === 'number' && v.pxIndex >= 0 && v.pxIndex < S.pxLevels.length) {
+        S.pxIndex = v.pxIndex | 0; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
+      }
+      if (typeof v.smoothStrength === 'number') {
+        S.smoothStrength = Math.max(0, Math.min(4, v.smoothStrength | 0));
+        $('smooth-strength').value = S.smoothStrength; $('smooth-val').textContent = S.smoothStrength;
+      }
+      if (v.smooth) { S.smooth = true; $('btn-smooth').classList.add('on'); $('smooth-control').classList.add('active'); }
+      if (typeof v.opacity === 'number') {
+        var op = Math.max(0, Math.min(100, v.opacity | 0));
+        $('opacity-slider').value = op; $('opacity-val').textContent = op + '%'; canvas.style.opacity = op / 100;
+      }
+      if (v.legendCollapsed) { $('legend').classList.add('collapsed'); $('toggle-legend-btn').innerHTML = '+'; S.legendVis = false; }
+      if (typeof v.satChannel === 'string') {
+        var fi = -1;
+        for (var i = 0; i < SAT_CHANNELS.length; i++) if (SAT_CHANNELS[i].id === v.satChannel) { fi = i; break; }
+        if (fi >= 0 && fi !== satChIdx) {
+          satChIdx = fi;
+          $('btn-channel').textContent = 'Канал: ' + SAT_CHANNELS[fi].label;
+          document.querySelectorAll('#channel-dropdown .dd-item').forEach(function(it, j) { it.classList.toggle('active', j === fi); });
+        }
+      }
+      if (v.layer === 'sat' || v.layer === 'wx') setLayer(v.layer); /* sat пересоздаст WMS с каналом */
+      if (v.dbzVisible === false && S.layer !== 'sat') {
+        S.dbzVisible = false; canvas.style.display = 'none'; applyDbzUI();
+      }
+    } catch (e) { /* битые данные — остаёмся на дефолте */ }
+  }
+
+  loadPalettesFromStorage(); restoreView(); buildLegend(); buildFrames(); updHUD(); updatePxLabel(); applyDbzUI(); schedRender();
 
   $('playbtn').addEventListener('click', togglePlay);
   $('spd').addEventListener('click', cycleSpeed);
   $('pxbtn').addEventListener('click', cyclePx);
   $('btn-smooth').addEventListener('click', toggleSmooth);
   $('btn-refresh').addEventListener('click', doRefresh);
+  if ($('btn-toggle-dbz')) $('btn-toggle-dbz').addEventListener('click', toggleDbz);
   $('btn-crosshair').addEventListener('click', toggleCrosshair);
   $('btn-ruler').addEventListener('click', toggleRuler);
   $('b-minus1h').addEventListener('click', function() { retrig(this, 'bump'); shiftTs(-3600); });
@@ -758,7 +1187,7 @@
 
   var smoothSlider = $('smooth-strength');
   var smoothValEl = $('smooth-val');
-  smoothSlider.addEventListener('input', function() { S.smoothStrength = parseInt(this.value); smoothValEl.textContent = S.smoothStrength; retrig(smoothValEl, 'bump'); if (S.smooth) { S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast('Сила сглаживания: ' + S.smoothStrength); } });
+  smoothSlider.addEventListener('input', function() { S.smoothStrength = parseInt(this.value); smoothValEl.textContent = S.smoothStrength; retrig(smoothValEl, 'bump'); if (S.smooth) { S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast('Сила сглаживания: ' + S.smoothStrength); } saveViewDebounced(); });
 
   document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { if (crosshairMode) { toggleCrosshair(); return; } if (S.ruler.active) { toggleRuler(); return; } if (helpModal && helpModal.classList.contains('open')) { closeHelp(); return; } if (modal.classList.contains('open')) { closeModal(); return; } } });
   map.on('zoomstart', function() { if (crosshairMode) hoverEl.style.display = 'none'; });
