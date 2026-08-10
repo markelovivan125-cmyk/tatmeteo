@@ -19,13 +19,13 @@
     <div id="layers-wrapper">
       <button class="btn on" id="btn-layers-menu">Слои: dBZ</button>
       <div class="dropdown-menu" id="layers-dropdown">
-        <div class="dd-item active" data-layer="radar">Отражаемость (dBZ)</div>
-        <div class="dd-item" data-layer="wx">ОЯ Явления</div>
-        <div class="dd-item" data-layer="sat">Спутник (EUMETSAT)</div>
+        <div class="dd-item active" data-layer="radar" tabindex="0" role="button">Отражаемость (dBZ)</div>
+        <div class="dd-item" data-layer="wx" tabindex="0" role="button">ОЯ Явления</div>
+        <div class="dd-item" data-layer="sat" tabindex="0" role="button">Спутник (EUMETSAT)</div>
       </div>
     </div>
     <div class="sep"></div>
-    <button class="btn icon-btn" id="btn-refresh" title="Обновить">↻</button>
+    <button class="btn icon-btn" id="btn-refresh" title="Обновить"><span class="ic">↻</span></button>
     <button class="btn" id="spd">1×</button>
     <button class="btn" id="pxbtn">2x2 км</button>
     <button class="btn" id="btn-smooth">Сглаживание</button>
@@ -125,5 +125,5 @@
     }, 15000);
   </script>
   <script src="script.js"></script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f42239a34f12a',t:'MTc4NjM2NzYxMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
