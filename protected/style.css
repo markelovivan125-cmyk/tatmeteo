@@ -376,3 +376,15 @@ body.light-theme #sat-pal-ch option { background: #fff; color: #000; }
 /* Легенда при скрытом слое dBZ — приглушена */
 #legend.dbz-off #lbody { opacity: 0.35; }
 #legend.dbz-off #ltitle::after { content: ' · скрыт'; color: var(--text-dim); }
+
+/* ═══ Этап 4: экспорт данных ═══ */
+#download-wrapper { position: relative; }
+/* Дропдаун экспорта позиционируется fixed из JS (координаты кнопки) —
+   поэтому его не обрезает скролл-контейнер #ctrl-scroll на мобильном */
+#download-dropdown { position: fixed; top: auto; left: auto; margin-top: 0; min-width: 230px; }
+/* Индикация «готовлю экспорт»: мягкая пульсация, клики заблокированы */
+#btn-download.busy-export { animation: dl-busy 1s var(--ease-in-out) infinite; pointer-events: none; }
+@keyframes dl-busy { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  #btn-download.busy-export { animation: none; opacity: 0.5; }
+}
