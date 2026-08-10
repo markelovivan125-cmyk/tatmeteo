@@ -396,7 +396,16 @@ body.light-theme #sat-pal-ch option { background: #fff; color: #000; }
 
 /* Индикатор зума: поверх слоя данных (выше канваса 350 и pane'ов Leaflet),
    ниже панелей (1000); не перехватывает клики по карте */
-#zoom-indicator { position: fixed; top: 16px; left: 16px; z-index: 900; pointer-events: none; background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 999px; padding: 5px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: var(--text); box-shadow: var(--shadow-sm); transition: background-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out); }
+/* ─── Иерархия z-index: слои данных и паны Leaflet ≤ 800 (tile 200 → radar 350 →
+   overlay/линейка 400 → markers 600 → popups 700 → controls 800) → индикатор зума 950 →
+   панели/чипы 1000 → restore 1200 → pulse 2000 → toast 5000 → модалки 9999.
+   ВАЖНО: #map намеренно НЕ изолируется (isolation/z-index) — канвас #radar (350)
+   сознательно вклинен МЕЖДУ панами (под линейкой 400), изоляция контекста карты
+   сломала бы линейку поверх радара. Поэтому гарантия для индикатора — запас 950:
+   выше любого пана (max 800 !important задан нами же), ниже панелей UI.
+   top:60px — ниже верхнего ящика-тулбара (после «ящиков» #ctrl примыкает к top:0
+   и на окнах уже ~1050px накрывал чип на прежнем top:16). */
+#zoom-indicator { position: fixed; top: 60px; left: 16px; z-index: 950; pointer-events: none; background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 999px; padding: 5px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: var(--text); box-shadow: var(--shadow-sm); transition: background-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out); }
 body.light-theme #zoom-indicator { background: rgba(255, 255, 255, 0.6) !important; border-color: rgba(0, 0, 0, 0.05) !important; color: #1a1a1a; }
 
 /* Длинные подписи легенды (каналы спутника) — аккуратный ellipsis в одну строку */
