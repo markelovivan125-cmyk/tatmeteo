@@ -8,50 +8,78 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg: #323441;
+      --glass-bg: rgba(38, 40, 51, 0.65);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      --text: #ffffff;
+      --text-dim: rgba(255, 255, 255, 0.72);
+      --accent: #5b8def;
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      --dur-fast: 120ms; --dur-base: 200ms; --dur-slow: 320ms;
+      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    * { box-sizing: border-box; }
     body {
-      margin: 0; padding: 0; background: #121212; color: #e0e0e0;
-      font-family: 'manrope', manrope; height: 100vh;
+      margin: 0; padding: 16px; min-height: 100vh;
+      background: var(--bg);
+      /* Мягкие «радарные» свечения на фоне */
+      background-image:
+        radial-gradient(600px 400px at 20% 15%, rgba(91, 141, 239, 0.14), transparent 70%),
+        radial-gradient(500px 500px at 85% 80%, rgba(91, 141, 239, 0.10), transparent 70%);
+      color: var(--text); font-family: 'Manrope', -apple-system, sans-serif;
       display: flex; align-items: center; justify-content: center;
+      -webkit-font-smoothing: antialiased;
     }
     .auth-box {
-      background: #1e1e1e; border: 1px solid #333;
-      border-radius: 8px; padding: 30px; width: 100%; max-width: 360px;
-      text-align: center;
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px; box-shadow: var(--shadow);
+      padding: 32px; width: 100%; max-width: 360px; text-align: center;
+      animation: card-in var(--dur-slow) var(--ease-out) backwards;
     }
-    .auth-logo {
-      font-size: 28px; font-weight: 700; color: #ffffff; margin-bottom: 5px;
-    }
-    .auth-subtitle {
-      font-size: 12px; letter-spacing: 1px;
-      color: #888; margin-bottom: 25px; text-transform: uppercase;
-    }
+    @keyframes card-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    .auth-logo { font-size: 26px; font-weight: 800; color: var(--text); margin-bottom: 6px; letter-spacing: 0.5px; }
+    .auth-subtitle { font-size: 11px; letter-spacing: 2px; color: var(--text-dim); margin-bottom: 26px; text-transform: uppercase; font-weight: 600; }
     .auth-form input {
-      width: 100%; box-sizing: border-box; background: #2a2a2a;
-      border: 1px solid #444; color: #ffffff;
-      padding: 12px 15px; border-radius: 6px; font-size: 15px;
-      margin-bottom: 15px; outline: none; transition: 0.2s;
+      width: 100%; background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--glass-border); color: var(--text);
+      padding: 12px 15px; border-radius: 10px; font-size: 15px; font-family: inherit;
+      margin-bottom: 14px; outline: none;
+      transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
     }
-    .auth-form input:focus {
-      border-color: #4a7fe8;
-    }
+    .auth-form input::placeholder { color: var(--text-dim); }
+    .auth-form input:hover { border-color: rgba(255, 255, 255, 0.2); }
+    .auth-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.25); background: rgba(0, 0, 0, 0.35); }
     .auth-captcha-box { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
     .auth-captcha-img {
-      flex: 1; height: 48px; background: #2a2a2a; border: 1px solid #444;
-      border-radius: 6px; cursor: pointer; display: flex; align-items: center;
+      flex: 1; height: 48px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--glass-border);
+      border-radius: 10px; cursor: pointer; display: flex; align-items: center;
       justify-content: center; overflow: hidden;
+      transition: border-color var(--dur-base) var(--ease-out), transform var(--dur-fast) var(--ease-out);
     }
+    .auth-captcha-img:hover { border-color: var(--accent); }
+    .auth-captcha-img:active { transform: scale(0.97); }
     .auth-captcha-img svg { width: 100%; height: 100%; }
-    .auth-captcha-box input {
-      width: 90px; margin-bottom: 0; text-align: center; text-transform: uppercase;
-      font-weight: 700; color: #ffffff;
-    }
+    .auth-captcha-box input { width: 90px; margin-bottom: 0; text-align: center; text-transform: uppercase; font-weight: 700; color: var(--text); }
     .auth-btn {
-      width: 100%; padding: 12px; background: #4a7fe8; color: #ffffff;
-      border: 0; border-radius: 6px; font-weight: 600; font-size: 15px;
-      cursor: pointer; transition: 0.2s;
+      width: 100%; padding: 13px; background: var(--accent); color: #ffffff;
+      border: 0; border-radius: 10px; font-weight: 700; font-size: 14px; font-family: inherit;
+      letter-spacing: 1px; cursor: pointer;
+      box-shadow: 0 4px 16px rgba(91, 141, 239, 0.4);
+      transition: background-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), transform var(--dur-fast) var(--ease-out), opacity var(--dur-base) var(--ease-out);
     }
-    .auth-btn:hover { background: #3a6fd8; }
-    .auth-error { color: #ff5252; font-size: 13px; margin-top: 15px; display: none; }
+    .auth-btn:hover { background: #6c99f2; box-shadow: 0 6px 22px rgba(91, 141, 239, 0.55); }
+    .auth-btn:active { transform: scale(0.97); }
+    .auth-btn:disabled { opacity: 0.6; cursor: wait; }
+    .auth-btn:focus-visible, .auth-captcha-img:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .auth-error { color: #ff6b6b; font-size: 13px; font-weight: 600; margin-top: 15px; display: none; animation: shake 0.4s var(--ease-out); }
+    @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-3px); } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
   </style>
 </head>
 <body>
@@ -121,5 +149,5 @@
 
     loadCaptcha();
   </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f442c5bc9f12a',t:'MTc4NjM2NzY5NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
