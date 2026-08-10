@@ -55,7 +55,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 #restore-tl { bottom: 16px; left: 50%; transform: translateX(-50%); }
 #restore-tl:active { transform: translateX(-50%) scale(0.96); }
 
-#ctrl { top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 6px; flex-wrap: wrap; max-width: calc(100vw - 32px); }
+#ctrl { top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 6px; flex-wrap: wrap; max-width: min(980px, calc(100vw - 32px)); justify-content: center; }
 /* Внутренняя обёртка тулбара: на десктопе просто flex с переносом,
    на мобиле — горизонтальный скролл (см. media), а #ctrl остаётся overflow:visible,
    чтобы дропдауны слоёв/каналов не обрезались */
@@ -172,7 +172,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 #pulse.busy::after { content: 'Загрузка данных…'; }
 #pulse:hover::after { opacity: 1; transform: translateY(0); }
 /* Статус-чип: слой · время кадра · загрузка (стеклянная капсула вместо сырого текста) */
-#dbg { position: fixed; bottom: 70px; left: 16px; font-size: 11px; color: var(--text-dim); z-index: 1000; pointer-events: none; font-weight: 600; background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 999px; padding: 5px 12px; box-shadow: var(--shadow-sm); white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; transition: opacity var(--dur-base) var(--ease-out), background-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out); }
+#dbg { position: fixed; bottom: 70px; left: 16px; font-size: 11px; color: var(--text-dim); z-index: 1000; pointer-events: auto; cursor: pointer; font-weight: 600; background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 999px; padding: 5px 12px; box-shadow: var(--shadow-sm); white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; transition: opacity var(--dur-base) var(--ease-out), background-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out); }
 #dbg:empty { display: none; }
 
 /* Toast: снизу по центру, fade+slide, очередь (создаётся из script.js) */
@@ -387,4 +387,72 @@ body.light-theme #sat-pal-ch option { background: #fff; color: #000; }
 @keyframes dl-busy { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) {
   #btn-download.busy-export { animation: none; opacity: 0.5; }
+}
+
+/* ═══ Этап 5: индикатор зума, мобильная/десктопная полировка ═══ */
+
+/* Индикатор зума: поверх слоя данных (выше канваса 350 и pane'ов Leaflet),
+   ниже панелей (1000); не перехватывает клики по карте */
+#zoom-indicator { position: fixed; top: 16px; left: 16px; z-index: 900; pointer-events: none; background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 999px; padding: 5px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: var(--text); box-shadow: var(--shadow-sm); transition: background-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out); }
+body.light-theme #zoom-indicator { background: rgba(255, 255, 255, 0.6) !important; border-color: rgba(0, 0, 0, 0.05) !important; color: #1a1a1a; }
+
+/* Длинные подписи легенды (каналы спутника) — аккуратный ellipsis в одну строку */
+.li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Трек таймлайна не должен схлопываться на узких экранах */
+#track { min-width: 90px; }
+
+/* Клик-состояние статус-чипа */
+#dbg:hover { border-color: var(--accent); }
+#dbg:active { opacity: 0.7; }
+
+/* ─── Десктоп: чуть крупнее текст кнопок на больших мониторах ─── */
+@media (min-width: 1280px) {
+  .btn { font-size: 13px; }
+}
+
+/* ─── Тач-слайдеры: тонкий видимый трек, но тач-зона 20px ─── */
+@media (pointer: coarse) {
+  #smooth-control input[type="range"], #opacity-control input[type="range"] {
+    height: 20px; width: 72px;
+    background: linear-gradient(rgba(255,255,255,0.12), rgba(255,255,255,0.12)) center / 100% 4px no-repeat;
+  }
+  #smooth-control input[type="range"]::-webkit-slider-thumb, #opacity-control input[type="range"]::-webkit-slider-thumb { width: 18px; height: 18px; }
+  #smooth-control input[type="range"]::-moz-range-thumb, #opacity-control input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; }
+}
+
+/* ─── Мобильные дополнения ─── */
+@media (max-width: 768px) {
+  /* Индикатор зума — слева под тулбаром; чип #dbg центрирован, но не шире 55vw,
+     чтобы не наезжать на индикатор */
+  #zoom-indicator { top: 58px; left: 8px; padding: 4px 9px; font-size: 10px; }
+  #dbg { max-width: 55vw; }
+
+  /* Toast: перенос строк для длинных сообщений, не перекрывает таймлайн */
+  #toast { white-space: normal; text-align: center; max-width: calc(100vw - 24px); line-height: 1.4; }
+
+  /* Модалки как bottom-sheet: прилипают к низу, скругление сверху */
+  #palette-modal, #help-modal { align-items: flex-end; }
+  .modal-content { width: 100%; max-width: none; border-radius: 20px 20px 0 0; max-height: 88vh; margin: 0; }
+  .open .modal-content { transform: translateY(0) scale(1); }
+  #palette-modal:not(.open) .modal-content, #help-modal:not(.open) .modal-content { transform: translateY(24px) scale(1); }
+
+  /* Safe-area для iPhone с вырезом (viewport-fit=cover уже в meta) */
+  #tl { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  #legend { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+  #toast { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  #restore-tl { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Подписи таймлайна не слипаются: на узких экранах оставляем 3 из 5 меток */
+  @media (max-width: 380px) {
+    #tlbls span:nth-child(2), #tlbls span:nth-child(4) { display: none; }
+  }
+}
+
+/* Очень узкие экраны (≤360px): компактнее кнопки, но тач-зона ≥40px сохраняется
+   через min-height в @media (pointer: coarse) */
+@media (max-width: 360px) {
+  .btn { padding: 5px 7px; font-size: 9.5px; }
+  .icon-btn { min-width: 30px; padding: 5px 6px; }
+  #ctrl { padding: 3px; }
 }
