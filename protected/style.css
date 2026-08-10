@@ -20,10 +20,25 @@
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
+  /* Поля ввода в модалках/формах */
+  --input-bg: rgba(0, 0, 0, 0.3);
+  --input-border: rgba(255, 255, 255, 0.1);
+  --input-text: #ffffff;
+  /* Семантические цвета действий (не путать с метео-палитрами данных) */
+  --danger: #ff5c5c;
+  --success: #56d68f;
+  /* Hover-состояния стеклянных поверхностей */
+  --panel-hover: rgba(255, 255, 255, 0.06);
 }
 body.light-theme {
   --text-dim: rgba(0, 0, 0, 0.62);
   --accent-glow: rgba(91, 141, 239, 0.16);
+  --input-bg: rgba(255, 255, 255, 0.65);
+  --input-border: rgba(0, 0, 0, 0.12);
+  --input-text: #1a1a1a;
+  --danger: #d64545;   /* темнее — контраст на белом */
+  --success: #1f9d55;
+  --panel-hover: rgba(0, 0, 0, 0.05);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple-system, sans-serif; color: var(--text); overflow: hidden; -webkit-font-smoothing: antialiased; }
@@ -221,7 +236,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 .create-form { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; margin-top: 16px; display: none; border: 1px solid var(--glass-border); }
 .create-form.open { display: block; }
 .create-form label { font-size: 10px; color: var(--text-dim); display: block; margin-top: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
-.create-form input[type="text"], .create-form input[type="number"] { width: 100%; padding: 8px 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 8px; color: #fff; font-size: 13px; margin-top: 6px; outline: none; font-family: inherit; }
+.create-form input[type="text"], .create-form input[type="number"] { width: 100%; padding: 8px 12px; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 8px; color: var(--input-text); font-size: 13px; margin-top: 6px; outline: none; font-family: inherit; }
 .create-form input:focus { border-color: var(--accent); }
 .create-form .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .create-form .row input[type="number"] { width: 70px; }
@@ -252,7 +267,6 @@ body.light-theme #track { background: rgba(0,0,0,0.1); }
 body.light-theme .modal-tabs { background: rgba(0,0,0,0.05); }
 body.light-theme .modal-tabs button.active { background: rgba(0,0,0,0.1); color: #000; }
 body.light-theme .create-form { background: rgba(0,0,0,0.03); }
-body.light-theme .create-form input { background: rgba(255,255,255,0.5); color: #000; }
 body.light-theme .entries-list .entry { border-color: rgba(0,0,0,0.05); }
 body.light-theme .leaflet-container { background: #e9eef3 !important; }
 body.light-theme .ruler-label, body.light-theme .ruler-segment-label { background: rgba(255,255,255,0.7) !important; color: #000 !important; }
@@ -292,21 +306,22 @@ body { transition: background-color 280ms var(--ease-in-out), color 280ms var(--
 #toggle-legend-btn { border-radius: 6px; padding: 2px 6px; transition: color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out); }
 #toggle-legend-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
 
-/* ─── prefers-reduced-motion: убираем движение и scale, оставляем только opacity ─── */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  /* Мягкие opacity-переходы оставляем — без движения */
-  #time-tooltip, .dropdown-menu, #palette-modal, #help-modal, .modal-content { transition: opacity 120ms linear !important; }
-  .dropdown-menu, .modal-content { transform: none !important; }
-  #time-tooltip { transform: translate(-50%, 0) !important; } /* центрирование сохраняем */
-  #pulse::before { display: none; }
-  .btn:active, #playbtn:active, .modal-close:active { transform: none; }
+/* ─── Режим «без анимаций»: класс html.reduce-motion вместо медиа-запроса.
+   Ставится ранним скриптом в <head>: (animPref==='auto' && системный
+   prefers-reduced-motion) ИЛИ animPref==='off'. Кнопка «Анимации: Вкл» снимает
+   класс — анимации работают даже при системном reduce (осознанный выбор). ─── */
+html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
+/* Мягкие opacity-переходы оставляем — без движения */
+html.reduce-motion #time-tooltip, html.reduce-motion .dropdown-menu, html.reduce-motion #palette-modal, html.reduce-motion #help-modal, html.reduce-motion .modal-content { transition: opacity 120ms linear !important; }
+html.reduce-motion .dropdown-menu, html.reduce-motion .modal-content { transform: none !important; }
+html.reduce-motion #time-tooltip { transform: translate(-50%, 0) !important; } /* центрирование сохраняем */
+html.reduce-motion #pulse::before { display: none; }
+html.reduce-motion .btn:active, html.reduce-motion #playbtn:active, html.reduce-motion .modal-close:active { transform: none; }
 
 /* ─── АДАПТИВ ДЛЯ ТЕЛЕФОНОВ ─── */
 @media (max-width: 768px) {
@@ -388,9 +403,7 @@ body.light-theme #sat-pal-ch option { background: #fff; color: #000; }
 /* Индикация «готовлю экспорт»: мягкая пульсация, клики заблокированы */
 #btn-download.busy-export { animation: dl-busy 1s var(--ease-in-out) infinite; pointer-events: none; }
 @keyframes dl-busy { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) {
-  #btn-download.busy-export { animation: none; opacity: 0.5; }
-}
+html.reduce-motion #btn-download.busy-export { animation: none; opacity: 0.5; }
 
 /* ═══ Этап 5: индикатор зума, мобильная/десктопная полировка ═══ */
 
@@ -500,9 +513,7 @@ body.light-theme #zoom-indicator { background: rgba(255, 255, 255, 0.6) !importa
 
 /* reduced-motion: выезды ящиков гасятся глобальным правилом (duration→0.01ms),
    но стартовые keyframes не должны оставлять панель за краем */
-@media (prefers-reduced-motion: reduce) {
-  #ctrl, #tl, #legend { animation: none; }
-}
+html.reduce-motion #ctrl, html.reduce-motion #tl, html.reduce-motion #legend { animation: none; }
 
 /* Чип #dbg на десктопе — чуть выше подросшего нижнего ящика */
 @media (min-width: 769px) {
@@ -531,9 +542,7 @@ body.light-theme #zoom-indicator { background: rgba(255, 255, 255, 0.6) !importa
 
 /* reduced-motion: выезды мгновенны (глобальное правило гасит длительности),
    restore-кнопки без движения */
-@media (prefers-reduced-motion: reduce) {
-  #restore-legend, #restore-tl { animation: none; }
-}
+html.reduce-motion #restore-legend, html.reduce-motion #restore-tl { animation: none; }
 
 /* Фон модалки на мобиле живёт столько же, сколько уезжает bottom-sheet (иначе
    visibility спрячет контейнер через 200мс и обрежет 500мс-выезд) */
@@ -541,3 +550,64 @@ body.light-theme #zoom-indicator { background: rgba(255, 255, 255, 0.6) !importa
   #palette-modal, #help-modal { transition: opacity var(--dur-drawer) var(--ease-out), visibility 0s linear var(--dur-drawer); }
   #palette-modal.open, #help-modal.open { transition: opacity var(--dur-base) var(--ease-out), visibility 0s; }
 }
+
+/* ═══ Этап 9: токены вместо inline-цветов, полировка модалок, светлая тема ═══ */
+
+/* ─── Поля и кнопки формы записей палитры (были inline #121212/#4a7fe8) ─── */
+.entry-input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 6px; color: var(--input-text); padding: 4px 6px; font-size: 12px; font-family: inherit; outline: none; transition: border-color var(--dur-base) var(--ease-out); }
+.entry-input:focus { border-color: var(--accent); }
+.entry-color { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 6px; }
+.save-entry-btn { background: var(--accent); border: none; color: #fff; border-radius: 6px; padding: 3px 10px; cursor: pointer; font-weight: 700; font-family: inherit; transition: background-color var(--dur-base) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+.save-entry-btn:hover { background: #6c99f2; }
+.save-entry-btn:active { transform: scale(0.94); }
+.entries-list .entry .edit-entry-btn, .entries-list .entry .del-entry { background: none; border: none; cursor: pointer; font-size: 12px; opacity: 0.75; transition: opacity var(--dur-base) var(--ease-out); }
+.entries-list .entry .edit-entry-btn { color: var(--text-dim); margin-right: 4px; }
+.entries-list .entry .del-entry { color: var(--danger); }
+.entries-list .entry:hover { background: var(--panel-hover); }
+
+/* Кнопки-действия с семантическими цветами (были inline в HTML) */
+.btn-danger { color: var(--danger) !important; }
+.btn-success { color: var(--success) !important; }
+
+/* Свач прицела: рамка зависит от темы (был inline border #000) */
+.ch-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(0, 0, 0, 0.6); vertical-align: middle; margin-right: 6px; }
+body.light-theme .ch-swatch { border-color: rgba(0, 0, 0, 0.25); }
+.ch-nodata { color: var(--text-dim); }
+
+/* ─── БЛОК B: полировка модалок ─── */
+.modal-content h2 { text-transform: none; letter-spacing: 0.3px; font-size: 15px; padding-bottom: 12px; border-bottom: 1px solid var(--glass-border); margin-bottom: 16px; }
+.modal-tabs button:hover { background: var(--panel-hover); color: var(--text); }
+.palette-item { border: 1px solid transparent; transition: background-color var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out); }
+.palette-item:hover { background: var(--panel-hover); }
+.palette-item.active { background: var(--accent-glow); border-color: rgba(91, 141, 239, 0.45); }
+.badge { font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: var(--text-dim); vertical-align: middle; }
+body.light-theme .badge { background: rgba(0, 0, 0, 0.06); }
+/* Длинный список палитр — тонкий скроллбар, как у легенды */
+.palette-list { max-height: 260px; overflow-y: auto; }
+.palette-list::-webkit-scrollbar { width: 3px; }
+.palette-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 2px; }
+body.light-theme .palette-list::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); }
+#help-modal p { font-size: 13px; line-height: 1.65; color: var(--text-dim); }
+/* Bottom-sheet: «ручка» сверху + safe-area снизу (только мобайл) */
+@media (max-width: 768px) {
+  .modal-content { position: relative; padding-top: 26px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35); }
+  .modal-content::before { content: ''; position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 36px; height: 4px; border-radius: 2px; background: var(--glass-border); }
+}
+
+/* ─── БЛОК A.3: недостающее покрытие светлой темы ─── */
+body.light-theme .dropdown-menu { background: rgba(255, 255, 255, 0.94) !important; border-color: rgba(0, 0, 0, 0.08); }
+body.light-theme .dd-item:hover { background: rgba(0, 0, 0, 0.05); color: #000; }
+body.light-theme .modal-close { background: rgba(0, 0, 0, 0.06); color: rgba(0, 0, 0, 0.55); }
+body.light-theme .modal-close:hover { background: rgba(0, 0, 0, 0.1); color: #000; }
+body.light-theme .modal-actions .btn { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.1); }
+body.light-theme .modal-content h2 { border-bottom-color: rgba(0, 0, 0, 0.08); }
+body.light-theme #hide-legend-btn:hover, body.light-theme #hide-tl-btn:hover, body.light-theme #toggle-legend-btn:hover { background: rgba(0, 0, 0, 0.06); color: #000; }
+body.light-theme #pulse::after { background: rgba(255, 255, 255, 0.95); color: #1a1a1a; border-color: rgba(0, 0, 0, 0.08); }
+body.light-theme .entries-list .entry:hover { background: var(--panel-hover); }
+body.light-theme .create-form { border-color: rgba(0, 0, 0, 0.08); }
+
+/* ─── БЛОК C.5: «тихие» микро-отклики, заметные в повседневной работе на ПК ─── */
+.li { transition: background-color var(--dur-base) var(--ease-out); border-radius: 6px; }
+#lbody .li:hover { background: var(--panel-hover); }
+.restore-btn:hover { transform: translateX(0) scale(1.04); }
+#restore-tl:hover { transform: translateX(-50%) scale(1.04); }
