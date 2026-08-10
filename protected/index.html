@@ -29,28 +29,33 @@
       <button class="btn on" id="btn-channel">Канал</button>
       <div class="dropdown-menu" id="channel-dropdown"></div>
     </div>
-    <div class="sep"></div>
-    <button class="btn icon-btn" id="btn-refresh" title="Обновить"><span class="ic">↻</span></button>
-    <button class="btn" id="spd">1×</button>
-    <button class="btn" id="pxbtn">2x2 км</button>
-    <button class="btn" id="btn-smooth">Сглаживание</button>
-    <div id="smooth-control">
-      <label>сила</label>
-      <input type="range" id="smooth-strength" min="0" max="4" step="1" value="1" />
-      <span id="smooth-val">1</span>
-    </div>
-    <div class="sep"></div>
-    <button class="btn icon-btn" id="btn-crosshair" title="Прицел">⊕</button>
-    <button class="btn" id="btn-ruler" title="Линейка">📏</button>
-    <div class="sep"></div>
-    <button class="btn icon-btn" id="btn-palettes" title="Палитры">🎨</button>
-    <button class="btn" id="btn-help">Справка</button>
-    <button class="btn" id="btn-theme">Тема</button>
+    <!-- Скролл вынесен на внутреннюю обёртку: #ctrl остаётся overflow:visible,
+         поэтому абсолютные дропдауны слоёв/каналов не обрезаются на мобильном -->
+    <div id="ctrl-scroll">
+      <div class="sep"></div>
+      <button class="btn icon-btn" id="btn-refresh" title="Обновить"><span class="ic">↻</span></button>
+      <button class="btn" id="spd">1×</button>
+      <button class="btn" id="pxbtn">2x2 км</button>
+      <button class="btn icon-btn" id="btn-toggle-dbz" title="Скрыть слой осадков">👁</button>
+      <button class="btn" id="btn-smooth">Сглаживание</button>
+      <div id="smooth-control">
+        <label>сила</label>
+        <input type="range" id="smooth-strength" min="0" max="4" step="1" value="1" />
+        <span id="smooth-val">1</span>
+      </div>
+      <div class="sep"></div>
+      <button class="btn icon-btn" id="btn-crosshair" title="Прицел">⊕</button>
+      <button class="btn" id="btn-ruler" title="Линейка">📏</button>
+      <div class="sep"></div>
+      <button class="btn icon-btn" id="btn-palettes" title="Палитры">🎨</button>
+      <button class="btn" id="btn-help">Справка</button>
+      <button class="btn" id="btn-theme">Тема</button>
 
-    <div id="opacity-control">
-      <label>🌓</label>
-      <input type="range" id="opacity-slider" min="0" max="100" value="100" />
-      <span id="opacity-val">100%</span>
+      <div id="opacity-control">
+        <label>🌓</label>
+        <input type="range" id="opacity-slider" min="0" max="100" value="100" />
+        <span id="opacity-val">100%</span>
+      </div>
     </div>
   </div>
 
@@ -86,7 +91,13 @@
   <div id="palette-modal">
     <div class="modal-content">
       <h2><span>🎨 Управление палитрами</span><button class="modal-close" id="modal-close">&times;</button></h2>
-      <div class="modal-tabs"><button class="active" data-layer="radar">Отражаемость</button><button data-layer="wx">Явления</button></div>
+      <div class="modal-tabs"><button class="active" data-layer="radar">Отражаемость</button><button data-layer="wx">Явления</button><button data-layer="sat">Спутник</button></div>
+      <!-- Выбор канала для палитр спутника (виден только на вкладке «Спутник») -->
+      <div id="sat-pal-ch-row" style="display:none">
+        <label for="sat-pal-ch">Канал</label>
+        <select id="sat-pal-ch"></select>
+        <div id="sat-pal-note"></div>
+      </div>
       <div id="palette-list-container" class="palette-list"></div>
       <div class="modal-actions">
         <button class="btn btn-primary" id="load-palette-btn">📂 Загрузить .pal</button>
@@ -131,5 +142,5 @@
     }, 15000);
   </script>
   <script src="script.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f6b09ccf5f12a',t:'MTc4NjM2OTI4Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f9c889a13f12a',t:'MTc4NjM3MTMxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
