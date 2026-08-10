@@ -2,6 +2,9 @@
   'use strict';
   var $ = function(id) { return document.getElementById(id); };
 
+  /* Перезапуск одноразовой CSS-анимации: снять класс → reflow → надеть класс */
+  function retrig(el, cls) { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+
   var hiddenPanels = {};
   window.closePanel = function(id) { var el = $(id); if (el) { el.style.display = 'none'; hiddenPanels[id] = true; } var rb = $('restore-' + id); if (rb) rb.style.display = 'block'; };
   window.restorePanel = function(id) { var el = $(id); if (el) { var flexPanels = { ctrl: 1, tl: 1 }; el.style.display = flexPanels[id] ? 'flex' : 'block'; hiddenPanels[id] = false; } var rb = $('restore-' + id); if (rb) rb.style.display = 'none'; };
@@ -53,7 +56,7 @@
     ts: 0, px: 1, layer: 'radar', playing: false, timer: null, speedI: 0, speeds: [1, 2, 4],
     frameI: 0, frames: [], cache: new Map(), pending: new Set(), failed: new Set(),
     cacheMax: 400, loadN: 0, manualTime: false, legendVis: true, smooth: false, smoothStrength: 1,
-    fade: { active: false, start: 0, duration: 400, alpha: 1 },
+    fade: { active: false, start: 0, duration: 300, alpha: 1 },
     pxLevels: [0.5, 1, 2, 4], pxIndex: 1,
     ruler: { active: false, points: [], markers: [], polyline: null, label: null, segmentLabels: [] }
   };
@@ -114,8 +117,23 @@
   setTimeout(function() { map.invalidateSize(); }, 500);
 
   var canvas = $('radar'), ctx = canvas.getContext('2d');
-  function resizeCanvas() { canvas.width = innerWidth; canvas.height = innerHeight; schedRender(); }
+  function resizeCanvas() { canvas.width = innerWidth; canvas.height = innerHeight; updThumb(); schedRender(); }
   addEventListener('resize', resizeCanvas); resizeCanvas();
+
+  /* ─── Crossfade кадров радара: снимок текущего canvas в offscreen-канвас,
+     старый кадр гаснет (1-alpha), новый проявляется (alpha) через rAF ─── */
+  var prevFrame = { canvas: document.createElement('canvas'), valid: false };
+  function startFrameFade() {
+    if (S.layer === 'sat') return;
+    try {
+      if (canvas.width > 0 && canvas.height > 0) {
+        prevFrame.canvas.width = canvas.width; prevFrame.canvas.height = canvas.height;
+        prevFrame.canvas.getContext('2d').drawImage(canvas, 0, 0);
+        prevFrame.valid = true;
+      }
+    } catch (e) { prevFrame.valid = false; }
+    S.fade.active = true; S.fade.start = performance.now(); S.fade.alpha = 0;
+  }
 
   function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * (1 << z)); }
   function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * (1 << z)); }
@@ -186,8 +204,11 @@
       $('dbg').textContent = '🛰 EUMETSAT (LIVE)';
       return;
     }
-    if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
-    var alpha = S.fade.active ? S.fade.alpha : 1; var tiles = visTiles(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = false;
+    if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; prevFrame.valid = false; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
+    var alpha = S.fade.active ? S.fade.alpha : 1; var tiles = visTiles();
+    /* Старый кадр гаснет под новым — плавная смена кадров без «прыжка» */
+    if (S.fade.active && prevFrame.valid) { ctx.globalAlpha = 1 - alpha; ctx.drawImage(prevFrame.canvas, 0, 0); }
+    ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = false;
     var hit = 0, miss = 0;
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], ck = CK(t.x, t.y), entry = S.cache.get(ck); 
@@ -198,9 +219,12 @@
     if (S.layer === 'wx') { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.beginPath(); for (var gi = 0; gi < tiles.length; gi++) { var gt = tiles[gi], gr = tileRect(gt.x, gt.y); if (gr.sw <= 0 || gr.sh <= 0) continue; var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY; if (bW < 1 || bH < 1) continue; var cols = Math.ceil(256 / S.px); for (var ci = 0; ci <= cols; ci++) { var lx = gr.sx + Math.round(ci * bW) + 0.5; ctx.moveTo(lx, gr.sy); ctx.lineTo(lx, gr.sy + gr.sh); } for (var ri = 0; ri <= cols; ri++) { var ly = gr.sy + Math.round(ri * bH) + 0.5; ctx.moveTo(gr.sx, ly); ctx.lineTo(gr.sx + gr.sw, ly); } } ctx.stroke(); ctx.restore(); }
   }
 
-  map.on('move', schedRender); map.on('moveend zoomend', function() { if (S.layer !== 'sat') S.failed.clear(); schedRender(); });
+  map.on('move', schedRender); map.on('movestart', function() { prevFrame.valid = false; }); map.on('moveend zoomend', function() { if (S.layer !== 'sat') S.failed.clear(); schedRender(); });
   function forceRefresh() { S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender(); }
+  /* Вращение иконки ↻ — видимый статус обновления */
+  function spinRefreshBtn() { var b = $('btn-refresh'); retrig(b, 'spinning'); setTimeout(function() { b.classList.remove('spinning'); }, 850); }
   function doRefresh() { 
+    spinRefreshBtn();
     if (S.layer === 'sat') { 
       if (eumetsatLayer) {
         map.removeLayer(eumetsatLayer);
@@ -211,10 +235,11 @@
       toast('Спутник обновлен'); 
       return; 
     }
-    setTime(nowTs(), false); buildFrames(); updHUD(); forceRefresh(); toast('Обновлено'); 
+    setTime(nowTs(), false); startFrameFade(); buildFrames(); updHUD(); forceRefresh(); toast('Обновлено'); 
   }
   function updHUD() { updThumb(); }
-  function updThumb() { var f = S.frames; if (!f.length) return; var r = f[f.length - 1] - f[0], p = r === 0 ? 0 : Math.max(0, Math.min(1, (S.ts - f[0]) / r)); $('tfill').style.width = p * 100 + '%'; $('tthumb').style.left = p * 100 + '%'; }
+  /* Прогресс и thumb — через transform (scaleX/translateX), а не left/width: без layout-перерасчётов */
+  function updThumb() { var f = S.frames; if (!f.length) return; var r = f[f.length - 1] - f[0], p = r === 0 ? 0 : Math.max(0, Math.min(1, (S.ts - f[0]) / r)); var tw = $('track').offsetWidth; $('tfill').style.transform = 'scaleX(' + p + ')'; $('tthumb').style.transform = 'translate(' + (p * tw) + 'px, -50%) translateX(-50%)'; }
   function buildFrames() {
     if (S.layer === 'sat') return;
     var mx = nowTs(), from = mx - MAX_HISTORY_SEC, frames = [];
@@ -241,9 +266,9 @@
   function formatTimeDiff(ts) { var now = nowTs(), diff = ts - now, ad = Math.abs(diff); if (ad < 60) return { text: 'сейчас', cls: 'now' }; var mins = Math.round(ad / 60), hours = Math.floor(mins / 60), rm = mins % 60, text = ''; if (hours > 0) { text = hours + 'ч'; if (rm > 0) text += ' ' + rm + 'м'; } else text = mins + 'м'; return diff < 0 ? { text: '−' + text + ' назад', cls: 'past' } : { text: '+' + text + ' вперёд', cls: 'future' }; }
   function showTimeTooltip(ts, pct) { var d = new Date(ts * 1000), ts2 = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Moscow' }), ds = d.toLocaleDateString('ru', { day: '2-digit', month: 'short', timeZone: 'Europe/Moscow' }), di = formatTimeDiff(ts); timeTooltip.innerHTML = '<div class="tt-time">' + ts2 + '</div><div class="tt-date">' + ds + ' МСК</div><div class="tt-diff ' + di.cls + '">' + di.text + '</div>'; timeTooltip.style.left = pct + '%'; timeTooltip.classList.add('visible'); }
   function hideTimeTooltip() { timeTooltip.classList.remove('visible'); }
-  $('track').addEventListener('pointerdown', function(e) { if (S.layer === 'sat') return; drag = true; var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX); S.ts = ts; updHUD(); S.manualTime = true; schedRender(); showTimeTooltip(ts, pct); this.setPointerCapture(e.pointerId); });
+  $('track').addEventListener('pointerdown', function(e) { if (S.layer === 'sat') return; drag = true; this.classList.add('dragging'); var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX); S.ts = ts; updHUD(); S.manualTime = true; schedRender(); showTimeTooltip(ts, pct); this.setPointerCapture(e.pointerId); });
   $('track').addEventListener('pointermove', function(e) { if (S.layer === 'sat') return; if (drag) { var ts = tsFromX(e.clientX), pct = pctFromX(e.clientX); S.ts = ts; updHUD(); schedRender(); showTimeTooltip(ts, pct); } });
-  document.addEventListener('pointerup', function() { if (drag) { drag = false; hideTimeTooltip(); if (S.layer !== 'sat') { buildFrames(); S.failed.clear(); forceRefresh(); } } });
+  document.addEventListener('pointerup', function() { if (drag) { drag = false; $('track').classList.remove('dragging'); hideTimeTooltip(); if (S.layer !== 'sat') { startFrameFade(); buildFrames(); S.failed.clear(); forceRefresh(); } } });
   $('track').addEventListener('mousemove', function(e) { if (S.layer === 'sat') return; if (!drag) showTimeTooltip(tsFromX(e.clientX), pctFromX(e.clientX)); });
   $('track').addEventListener('mouseleave', function() { if (!drag) hideTimeTooltip(); });
 
@@ -253,18 +278,20 @@
     buildFrames(); S.frameI = 0; 
     S.timer = setInterval(function() {
       S.frameI = (S.frameI + 1) % S.frames.length;
+      startFrameFade(); /* crossfade между кадрами анимации */
       S.ts = S.frames[S.frameI];
       S.failed.clear(); schedRender(); updHUD();
     }, animMs());
-    S.playing = true; $('playbtn').innerHTML = '&#x25A0;';
+    S.playing = true; $('playbtn').innerHTML = '&#x25A0;'; retrig($('playbtn'), 'pop');
   }
-  function stopPlay() { clearInterval(S.timer); S.timer = null; S.playing = false; $('playbtn').innerHTML = '&#x25B6;'; }
-  function cycleSpeed() { S.speedI = (S.speedI + 1) % S.speeds.length; $('spd').textContent = S.speeds[S.speedI] + '×'; if (S.playing) { stopPlay(); startPlay(); } }
+  function stopPlay() { var was = S.playing; clearInterval(S.timer); S.timer = null; S.playing = false; $('playbtn').innerHTML = '&#x25B6;'; if (was) retrig($('playbtn'), 'pop'); }
+  function cycleSpeed() { S.speedI = (S.speedI + 1) % S.speeds.length; var spd = $('spd'); spd.textContent = S.speeds[S.speedI] + '×'; spd.classList.toggle('on', S.speedI > 0); retrig(spd, 'bump'); if (S.playing) { stopPlay(); startPlay(); } }
   function shiftTs(d) {
     if (S.layer === 'sat') return;
     stopPlay();
     var n = Math.round((S.ts + d) / STEP) * STEP; var mn = minTs(), mx = nowTs();
     n = Math.max(mn, Math.min(n, mx)); if (n <= mn) toast('⚠️ Максимум ' + HISTORY_MINUTES + ' мин назад');
+    startFrameFade();
     setTime(n, true); buildFrames(); updHUD(); S.failed.clear(); forceRefresh();
     toast('⏱ ' + new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }));
   }
@@ -293,16 +320,17 @@
       S.cache.clear(); S.pending.clear(); S.failed.clear();
       buildFrames(); forceRefresh();
     }
-    S.fade.active = true; S.fade.start = performance.now(); S.fade.alpha = 0;
+    startFrameFade(); /* плавный переход между слоями (для sat — no-op) */
     buildLegend(); hidePopup();
     if (S.ruler.active) toggleRuler();
   }
 
   function cyclePx() { if (S.layer === 'sat') return; S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); }
   function updatePxLabel() { var resKm = (S.px * BASE_RES_KM); var label = resKm.toFixed(1) + ' км'; if (resKm === 1) label = '1x1 км'; if (resKm === 2) label = '2x2 км'; if (resKm === 4) label = '4x4 км'; if (resKm === 8) label = '8x8 км'; $('pxbtn').textContent = label; }
-  function toggleSmooth() { if (S.layer === 'sat') return; S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); btn.textContent = 'Сглаживание ✓'; ctrl.classList.add('active'); } else { btn.classList.remove('on'); btn.textContent = 'Сглаживание'; ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); }
+  /* Текст кнопок не меняем на «✓» — активность показывает состояние .on (без прыжков ширины) */
+  function toggleSmooth() { if (S.layer === 'sat') return; S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); ctrl.classList.add('active'); } else { btn.classList.remove('on'); ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); }
 
-  function toggleRuler() { S.ruler.active = !S.ruler.active; var btn = $('btn-ruler'); if (S.ruler.active) { btn.classList.add('on'); btn.textContent = '📏 ✓'; toast('Клик — точка, двойной клик — завершить.'); map.on('click', rulerClick); map.on('dblclick', rulerFinish); if (crosshairMode) toggleCrosshair(); } else { btn.classList.remove('on'); btn.textContent = '📏'; map.off('click', rulerClick); map.off('dblclick', rulerFinish); clearRuler(); } }
+  function toggleRuler() { S.ruler.active = !S.ruler.active; var btn = $('btn-ruler'); if (S.ruler.active) { btn.classList.add('on'); toast('Клик — точка, двойной клик — завершить.'); map.on('click', rulerClick); map.on('dblclick', rulerFinish); if (crosshairMode) toggleCrosshair(); } else { btn.classList.remove('on'); map.off('click', rulerClick); map.off('dblclick', rulerFinish); clearRuler(); } }
   function rulerClick(e) { if (!S.ruler.active) return; var latlng = e.latlng; S.ruler.points.push(latlng); var marker = L.circleMarker(latlng, { radius: 5, color: '#5b8def', fillColor: '#fff', fillOpacity: 1, weight: 2, className: 'ruler-marker' }).addTo(map); S.ruler.markers.push(marker); updateRulerLine(); updateRulerLabels(); }
   function updateRulerLine() { if (S.ruler.polyline) { map.removeLayer(S.ruler.polyline); S.ruler.polyline = null; } if (S.ruler.points.length >= 2) { S.ruler.polyline = L.polyline(S.ruler.points, { color: '#5b8def', weight: 2, dashArray: '6 4', opacity: 0.8, className: 'ruler-line' }).addTo(map); } }
   function updateRulerLabels() { S.ruler.segmentLabels.forEach(function(l) { map.removeLayer(l); }); S.ruler.segmentLabels = []; if (S.ruler.label) { map.removeLayer(S.ruler.label); S.ruler.label = null; } if (S.ruler.points.length < 2) return; var totalDist = 0; for (var i = 1; i < S.ruler.points.length; i++) { totalDist += S.ruler.points[i - 1].distanceTo(S.ruler.points[i]); } var distKm = (totalDist / 1000).toFixed(1); var midIdx = Math.floor((S.ruler.points.length - 1) / 2); var midLatLng = S.ruler.points[midIdx]; var labelHtml = '<div class="ruler-label">📏 ' + distKm + ' км</div>'; S.ruler.label = L.marker(midLatLng, { icon: L.divIcon({ className: '', html: labelHtml, iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(map); for (var j = 1; j < S.ruler.points.length; j++) { var p1 = S.ruler.points[j - 1], p2 = S.ruler.points[j]; var segDist = (p1.distanceTo(p2) / 1000).toFixed(1); var midSeg = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2); var segLabel = L.marker(midSeg, { icon: L.divIcon({ className: '', html: '<div class="ruler-segment-label">' + segDist + ' км</div>', iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(map); S.ruler.segmentLabels.push(segLabel); } }
@@ -317,7 +345,7 @@
       return;
     }
     var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; $('ltitle').textContent = title; 
-    items.forEach(function(p) { var row = document.createElement('div'); row.className = 'li'; var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
+    items.forEach(function(p, i) { var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14)); var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
   }
   function toggleLegend() { var lg = $('legend'), btn = $('toggle-legend-btn'); if (S.legendVis) { lg.classList.add('collapsed'); btn.innerHTML = '+'; } else { lg.classList.remove('collapsed'); btn.innerHTML = '−'; } S.legendVis = !S.legendVis; }
   var toastTmr;
@@ -364,8 +392,12 @@
 
   var modal = $('palette-modal'), modalClose = $('modal-close'), modalTabs = document.querySelectorAll('.modal-tabs button'), paletteListContainer = $('palette-list-container'), loadPaletteBtn = $('load-palette-btn'), fileInput = $('file-input'), createPaletteBtn = $('create-palette-btn'), deletePaletteBtn = $('delete-palette-btn'), exportPaletteBtn = $('export-palette-btn'), createForm = $('create-form'), newPalName = $('new-pal-name'), entryVal = $('entry-val'), entryColor = $('entry-color'), entryLabel = $('entry-label'), addEntryBtn = $('add-entry-btn'), entriesList = $('entries-list'), savePaletteBtn = $('save-palette-btn'), cancelCreateBtn = $('cancel-create-btn');
   var currentLayerForModal = 'radar'; var tempEntries = []; var editingIndex = -1; var editingEntryIndex = -1;
-  function openModal() { modal.classList.add('open'); currentLayerForModal = (S.layer === 'sat' ? 'radar' : S.layer); modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
-  function closeModal() { modal.classList.remove('open'); closeForm(); }
+  /* a11y: фокус уходит в модалку при открытии и возвращается на вызвавшую кнопку при закрытии */
+  var lastFocused = null;
+  function focusModal(m) { var mc = m.querySelector('.modal-content'); if (mc) { mc.setAttribute('tabindex', '-1'); mc.focus({ preventScroll: true }); } }
+  function restoreFocus() { if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus(); lastFocused = null; }
+  function openModal() { lastFocused = document.activeElement; modal.classList.add('open'); focusModal(modal); currentLayerForModal = (S.layer === 'sat' ? 'radar' : S.layer); modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
+  function closeModal() { modal.classList.remove('open'); closeForm(); restoreFocus(); }
   function renderPaletteList() { var list = palettes[currentLayerForModal].list; var activeIdx = palettes[currentLayerForModal].activeIdx; var html = ''; list.forEach(function(p, idx) { var activeClass = idx === activeIdx ? 'active' : ''; var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : ''; var editBtn = p.builtin ? '' : '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>'; html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' + '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' + '<div>' + editBtn + (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') + '</div></div>'; }); paletteListContainer.innerHTML = html; paletteListContainer.querySelectorAll('.palette-item').forEach(function(el) { el.addEventListener('click', function(e) { if (e.target.classList.contains('del') || e.target.classList.contains('edit-btn')) return; var idx = parseInt(this.dataset.idx); palettes[currentLayerForModal].activeIdx = idx; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } }); }); paletteListContainer.querySelectorAll('.edit-btn').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); startEditingPalette(idx); }); }); paletteListContainer.querySelectorAll('.del').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); var list2 = palettes[currentLayerForModal].list; if (list2[idx].builtin) return; if (confirm('Удалить палитру "' + list2[idx].name + '"?')) { list2.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx = list2.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } }); }); }
   function startEditingPalette(idx) { var list = palettes[currentLayerForModal].list; if (idx < 0 || idx >= list.length) return; var pal = list[idx]; if (pal.builtin) { toast('Встроенную палитру нельзя редактировать'); return; } editingIndex = idx; newPalName.value = pal.name; tempEntries = pal.items.map(function(item) { return { val: item.v, color: '#' + item.r.map(function(c) { return c.toString(16).padStart(2, '0'); }).join(''), label: item.l, r: { r: item.r[0], g: item.r[1], b: item.r[2] } }; }); editingEntryIndex = -1; renderEntries(); createForm.classList.add('open'); savePaletteBtn.textContent = '💾 Обновить'; toast('Редактирование палитры "' + pal.name + '"'); }
   function closeForm() { createForm.classList.remove('open'); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); savePaletteBtn.textContent = '💾 Сохранить'; newPalName.value = 'Новая палитра'; entryVal.value = '0'; entryColor.value = '#00aaff'; entryLabel.value = 'Осадки'; }
@@ -403,13 +435,18 @@
         canvas.style.opacity = val / 100;
       }
       opacityVal.textContent = val + '%';
+      retrig(opacityVal, 'bump'); /* лёгкий отклик значения */
     });
   }
 
   var helpModal = $('help-modal');
   var helpClose = $('help-close');
-  if ($('btn-help')) { $('btn-help').addEventListener('click', function() { if (helpModal) helpModal.classList.add('open'); }); }
-  if (helpClose) { helpClose.addEventListener('click', function() { if (helpModal) helpModal.classList.remove('open'); }); }
+  function closeHelp() { if (helpModal) { helpModal.classList.remove('open'); restoreFocus(); } }
+  if ($('btn-help')) { $('btn-help').addEventListener('click', function() { if (helpModal) { lastFocused = document.activeElement; helpModal.classList.add('open'); focusModal(helpModal); } }); }
+  if (helpClose) { helpClose.addEventListener('click', closeHelp); }
+  /* Клик по фону закрывает модалки */
+  modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+  if (helpModal) { helpModal.addEventListener('click', function(e) { if (e.target === helpModal) closeHelp(); }); }
 
   if ($('btn-theme')) { $('btn-theme').addEventListener('click', function() { document.body.classList.toggle('light-theme'); var isLight = document.body.classList.contains('light-theme'); toast(isLight ? 'Светлая тема включена' : 'Темная тема включена'); if (map.hasLayer(darkTileLayer)) { map.removeLayer(darkTileLayer); lightTileLayer.addTo(map); } else { map.removeLayer(lightTileLayer); darkTileLayer.addTo(map); } }); }
 
@@ -429,74 +466,22 @@
   $('legend-header').addEventListener('click', toggleLegend);
 
   $('btn-layers-menu').addEventListener('click', function(e) { e.stopPropagation(); $('layers-dropdown').classList.toggle('visible'); });
-  document.querySelectorAll('#layers-dropdown .dd-item').forEach(function(item) { item.addEventListener('click', function() { setLayer(this.dataset.layer); $('layers-dropdown').classList.remove('visible'); }); });
+  document.querySelectorAll('#layers-dropdown .dd-item').forEach(function(item) {
+    item.addEventListener('click', function() { setLayer(this.dataset.layer); $('layers-dropdown').classList.remove('visible'); });
+    /* Клавиатура: Enter/Space выбирают слой */
+    item.addEventListener('keydown', function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLayer(this.dataset.layer); $('layers-dropdown').classList.remove('visible'); $('btn-layers-menu').focus(); } });
+  });
   document.addEventListener('click', function(e) { if (!$('layers-wrapper').contains(e.target)) { $('layers-dropdown').classList.remove('visible'); } });
 
   var smoothSlider = $('smooth-strength');
   var smoothValEl = $('smooth-val');
-  smoothSlider.addEventListener('input', function() { S.smoothStrength = parseInt(this.value); smoothValEl.textContent = S.smoothStrength; if (S.smooth) { S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast('Сила сглаживания: ' + S.smoothStrength); } });
+  smoothSlider.addEventListener('input', function() { S.smoothStrength = parseInt(this.value); smoothValEl.textContent = S.smoothStrength; retrig(smoothValEl, 'bump'); if (S.smooth) { S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast('Сила сглаживания: ' + S.smoothStrength); } });
 
-  document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { if (crosshairMode) { toggleCrosshair(); return; } if (S.ruler.active) { toggleRuler(); return; } if (modal.classList.contains('open')) { closeModal(); return; } } });
+  document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { if (crosshairMode) { toggleCrosshair(); return; } if (S.ruler.active) { toggleRuler(); return; } if (helpModal && helpModal.classList.contains('open')) { closeHelp(); return; } if (modal.classList.contains('open')) { closeModal(); return; } } });
   map.on('zoomstart', function() { if (crosshairMode) hoverEl.style.display = 'none'; });
   map.on('move moveend zoomend', function() { if (crosshairMode) updateCrosshair(); });
   window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
 
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
   console.log('2×2 Радар загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
-  /* ─── АДАПТИВ ДЛЯ ТЕЛЕФОНОВ ─── */
-@media (max-width: 768px) {
-  /* Верхняя панель */
-  #ctrl { 
-    top: 8px; 
-    padding: 4px; 
-    gap: 2px;
-    border-radius: 12px;
-    max-width: calc(100vw - 16px);
-  }
-  .btn { 
-    padding: 5px 8px; 
-    font-size: 10px; 
-    border-radius: 6px;
-  }
-  .icon-btn { 
-    padding: 5px 6px; 
-    font-size: 12px; 
-  }
-  /* Скрываем разделители на мобильных */
-  .sep { display: none; }
-  
-  /* Таймлайн */
-  #tl { 
-    bottom: 8px; 
-    padding: 6px 10px; 
-    border-radius: 12px;
-    width: calc(100vw - 16px);
-    gap: 8px;
-  }
-  #playbtn { width: 28px; height: 28px; font-size: 12px; }
-  #b-minus1h, #b-minus10m, #b-plus10m { padding: 3px 6px; font-size: 9px; }
-  
-  /* Легенда */
-  #legend { 
-    bottom: 60px; 
-    right: 8px; 
-    left: 8px; 
-    width: auto; 
-    min-width: 0;
-    max-height: 30vh;
-    padding: 10px;
-  }
-  .li { font-size: 10px; }
-  .lsq { width: 10px; height: 10px; }
-  
-  /* Модальные окна */
-  .modal-content { 
-    width: 95%; 
-    padding: 16px; 
-    border-radius: 12px; 
-    max-height: 90vh; 
-  }
-  .create-form .row { flex-wrap: wrap; }
-  .create-form .row input[type="number"] { width: 60px; }
-}
 })();
