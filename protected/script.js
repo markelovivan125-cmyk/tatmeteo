@@ -42,6 +42,11 @@
 
   /* ─── Спутник EUMETSAT: сетка времени 15 мин, задержка публикации ~20 мин, история 12 ч ─── */
   var SAT_STEP = 900, SAT_DELAY = 1200, SAT_HISTORY_SEC = 12 * 3600;
+  /* БЛОК A: спутник ВСЕГДА полупрозрачный — базовая карта видна сквозь тайлы.
+     Вариант №1 (жёстко 50%): слайдер в sat-режиме заблокирован и показывает 50,
+     значение радара запоминается и возвращается при выходе из sat. */
+  var SAT_OPACITY = 0.5;
+  var radarOpacityMem = 100; /* значение слайдера прозрачности до входа в sat */
 
   /* ─── Определение устройства: мобильный → меньше кэш, легче обработка, DPR-потолок ─── */
   var IS_MOBILE = matchMedia('(max-width: 768px)').matches || matchMedia('(pointer: coarse)').matches;
@@ -550,7 +555,7 @@
     var tstr = new Date((live ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
     var prog = satLoading ? ' · ⏳' + Math.min(satTilesDone, satTilesTotal) + '/' + satTilesTotal : '';
     var errTxt = err ? (satErrType === 'timeout' ? ' · ⚠️ таймаут' : ' · ⚠️ сеть/сервер') : '';
-    setChip('🛰 ' + ch.label + ' · ' + tstr + ' МСК' + (live ? ' (LIVE, ~15 мин задержка)' : '') + prog + errTxt + ' · © EUMETSAT');
+    setChip('🛰 ' + ch.label + ' · ' + tstr + ' МСК' + (live ? ' (LIVE, ~15 мин задержка)' : '') + prog + errTxt + ' · непрозр. 50% · © EUMETSAT');
   }
 
   /* ─── Применение времени/канала спутника: новый WMS-слой поверх, старый снимается
@@ -567,7 +572,7 @@
       var old = eumetsatLayer;
       /* Недогруженный «предыдущий предыдущий» слой убираем сразу */
       if (satOldLayer && map.hasLayer(satOldLayer)) { map.removeLayer(satOldLayer); satOldLayer = null; }
-      var lyr = createEumetsatLayer(parseInt($('opacity-slider').value) / 100, ch, live ? null : S.ts);
+      var lyr = createEumetsatLayer(SAT_OPACITY, ch, live ? null : S.ts); /* прозрачность фиксирована — не скачет при смене кадра/канала */
       attachSatEvents(lyr);
       lyr.addTo(map);
       eumetsatLayer = lyr;
@@ -822,7 +827,12 @@
     if (S.layer === 'sat') {
       /* Спутник: канвас радара плавно гаснет, таймлайн ОСТАЁТСЯ (история WMS через time=) */
       fadeCanvas(false);
-      $('opacity-slider').disabled = false; $('opacity-control').classList.remove('disabled');
+      /* Прозрачность спутника фиксирована 50%: запоминаем значение радара,
+         слайдер показывает 50 и блокируется (как для скрытого dBZ) */
+      radarOpacityMem = parseInt($('opacity-slider').value) || 100;
+      $('opacity-slider').value = Math.round(SAT_OPACITY * 100);
+      $('opacity-val').textContent = Math.round(SAT_OPACITY * 100) + '%';
+      $('opacity-slider').disabled = true; $('opacity-control').classList.add('disabled');
       $('channel-wrapper').style.display = 'block';
       S.manualTime = false; S.ts = nowTs();
       buildFrames(); updHUD();
@@ -836,7 +846,12 @@
       if (satOldLayer) { if (map.hasLayer(satOldLayer)) map.removeLayer(satOldLayer); satOldLayer = null; }
       satLoading = false; $('pulse').classList.remove('busy');
       $('channel-wrapper').style.display = 'none';
-      fadeCanvas(true);
+      /* Возвращаем прозрачность радара, какой была до входа в sat; слайдер снова активен
+         (applyDbzUI ниже уточнит disabled-состояние по S.dbzVisible) */
+      $('opacity-slider').value = radarOpacityMem;
+      $('opacity-val').textContent = radarOpacityMem + '%';
+      $('opacity-slider').disabled = false; $('opacity-control').classList.remove('disabled');
+      fadeCanvas(true); /* использует значение слайдера — восстановить ДО вызова */
       S.manualTime = false; S.ts = nowTs();
       S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
       S.cache.clear(); S.pending.clear(); S.failed.clear();
@@ -939,6 +954,7 @@
         });
       }
       if (ch.day) { var d = document.createElement('div'); d.className = 'li legend-note'; d.style.setProperty('--i', Math.min(idx++, 14)); d.textContent = '☀️ Канал информативен только днём'; el.appendChild(d); }
+      var opn = document.createElement('div'); opn.className = 'li legend-note'; opn.style.setProperty('--i', Math.min(idx++, 14)); opn.textContent = 'Прозрачность слоя: 50%'; el.appendChild(opn);
       /* Обязательная атрибуция по лицензии EUMETSAT */
       var attr = document.createElement('div'); attr.className = 'li legend-note'; attr.style.setProperty('--i', Math.min(idx++, 14)); attr.textContent = '© EUMETSAT'; el.appendChild(attr);
       return;
@@ -1144,7 +1160,7 @@
   /* На таче приглушаем панели во время перетаскивания карты — карту видно целиком */
   if (IS_MOBILE) {
     var dragDimTmr = null;
-    map.on('movestart', function() { clearTimeout(dragDimTmr); document.body.classList.add('map-drag'); });
+    map.on('movestart', function() { if (document.querySelector('.dropdown-menu.visible')) return; /* дропдаун открыт — не глушим */ clearTimeout(dragDimTmr); document.body.classList.add('map-drag'); });
     map.on('moveend', function() { clearTimeout(dragDimTmr); dragDimTmr = setTimeout(function() { document.body.classList.remove('map-drag'); }, 250); });
   }
 
@@ -1409,7 +1425,7 @@
         pxIndex: S.pxIndex,
         smooth: S.smooth,
         smoothStrength: S.smoothStrength,
-        opacity: parseInt($('opacity-slider').value) || 100,
+        opacity: S.layer === 'sat' ? radarOpacityMem : (parseInt($('opacity-slider').value) || 100), /* 50% спутника не затирают настройку радара */
         theme: currentTheme, /* 'dark' | 'light' | 'scheme' */
         legendCollapsed: $('legend').classList.contains('collapsed'),
         dbzVisible: S.dbzVisible
@@ -1417,8 +1433,28 @@
     } catch (e) {}
   }
   var saveViewTmr = null;
-  function saveViewDebounced() { clearTimeout(saveViewTmr); saveViewTmr = setTimeout(saveView, 300); }
+  /* Дебаунс 150мс: быстрые свайпы/зумы успевают сохраниться до ухода со страницы */
+  function saveViewDebounced() { clearTimeout(saveViewTmr); saveViewTmr = setTimeout(saveView, 150); }
   map.on('moveend zoomend', saveViewDebounced);
+  map.on('zoom', saveViewDebounced); /* pinch/double-tap зум фиксируется ещё в процессе */
+  /* ГЛАВНЫЙ фикс для мобильных: вкладка сворачивается/закрывается до дебаунса —
+     сохраняем немедленно. pagehide надёжнее beforeunload на iOS/Android. */
+  window.addEventListener('pagehide', saveView);
+  document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'hidden') saveView(); });
+  window.addEventListener('beforeunload', saveView); /* не блокирующий, просто сейв */
+
+  /* ─── Индикатор зума поверх слоя данных (#zoom-indicator): z-index 900 —
+     выше канваса радара (350) и pane'ов Leaflet, ниже панелей (1000) ─── */
+  function updZoomChip(bump) {
+    var el = $('zoom-indicator'); if (!el) return;
+    var txt = 'Z' + map.getZoom();
+    if (el.textContent !== txt) {
+      el.textContent = txt;
+      if (bump && !REDUCE_MOTION) retrig(el, 'bump');
+    }
+  }
+  map.on('zoom', function() { updZoomChip(false); });      /* живое обновление при pinch */
+  map.on('zoomend', function() { updZoomChip(true); });    /* «bump» только по факту смены */
 
   /* Восстановление ДО первой тяжёлой отрисовки; время кадра не восстанавливаем — всегда LIVE */
   function restoreView() {
@@ -1465,12 +1501,22 @@
   }
 
   loadPalettesFromStorage(); applyTheme('dark', false); restoreView(); buildLegend(); buildFrames(); updHUD(); updatePxLabel(); applyDbzUI(); schedRender();
+  /* После restoreView (и при первом заходе без сохранений): актуальный зум в чипе
+     и повторный invalidateSize — на мобильных вьюпорт меняется из-за URL-бара */
+  updZoomChip(false);
+  setTimeout(function() { map.invalidateSize(); updZoomChip(false); }, 100);
+  window.addEventListener('load', function() { setTimeout(function() { map.invalidateSize(); }, 200); });
 
   $('playbtn').addEventListener('click', togglePlay);
   $('spd').addEventListener('click', cycleSpeed);
   $('pxbtn').addEventListener('click', cyclePx);
   $('btn-smooth').addEventListener('click', toggleSmooth);
   $('btn-refresh').addEventListener('click', doRefresh);
+  /* Статус-чип кликабелен: на ПК — принудительное обновление, на мобильном сначала
+     показываем полный текст (чип обрезан ellipsis'ом), т.к. title по тапу недоступен */
+  $('dbg').addEventListener('click', function() {
+    if (IS_MOBILE) { toast(this.textContent || ''); } else { doRefresh(); }
+  });
   if ($('btn-toggle-dbz')) $('btn-toggle-dbz').addEventListener('click', toggleDbz);
   $('btn-crosshair').addEventListener('click', toggleCrosshair);
   $('btn-ruler').addEventListener('click', toggleRuler);
