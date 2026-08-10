@@ -30,6 +30,8 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 /* Убрали z-index у #map, чтобы внутренние слои Leaflet могли перекрывать #radar */
 #map { position: fixed; inset: 0; }
 #radar { position: fixed; inset: 0; z-index: 350; pointer-events: none; image-rendering: pixelated; }
+/* Crossfade канваса при переключении radar↔sat (класс вешает fadeCanvas в script.js) */
+#radar.cfade { transition: opacity 250ms var(--ease-out); }
 
 /* Жестко задаем z-index для слоев Leaflet, чтобы линейка была поверх радара */
 .leaflet-container { background: var(--bg) !important; }
@@ -75,6 +77,10 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 .modal-content:focus-visible { outline: none; }
 
 #layers-wrapper { position: relative; }
+#channel-wrapper { position: relative; } /* якорь дропдауна каналов спутника */
+#channel-dropdown { max-height: min(440px, 65vh); overflow-y: auto; }
+#channel-dropdown::-webkit-scrollbar { width: 3px; }
+#channel-dropdown::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 /* Дропдаун: плавное появление opacity + translateY/scale вместо display-рывка */
 .dropdown-menu { position: absolute; top: 100%; left: 0; margin-top: 8px; background: var(--glass-bg-solid); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%); border: 1px solid var(--glass-border); border-radius: var(--radius-md); padding: 6px; box-shadow: var(--shadow); z-index: 1500; min-width: 200px; max-width: calc(100vw - 24px); display: block; visibility: hidden; opacity: 0; transform: translateY(-6px) scale(0.98); transform-origin: top left; pointer-events: none; transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out), visibility 0s linear var(--dur-base); }
 .dropdown-menu.visible { visibility: visible; opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out), visibility 0s; }
@@ -100,12 +106,25 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 @keyframes val-bump { 0% { transform: scale(1); } 45% { transform: scale(1.28); color: var(--accent); } 100% { transform: scale(1); } }
 
 #legend { bottom: 90px; right: 16px; padding: 16px; min-width: 160px; max-height: 50vh; overflow-y: auto; }
-#legend::-webkit-scrollbar { width: 3px; } #legend::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-#legend.collapsed { padding: 12px 16px; max-height: 40px; overflow: hidden; }
+#legend::-webkit-scrollbar { width: 3px; }
+#legend::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; transition: background-color var(--dur-base) var(--ease-out); }
+#legend:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.28); }
+#legend.collapsed { overflow: hidden; }
 #legend-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
 #legend-header h3 { font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+/* Плавная смена заголовка при переключении слоя/канала */
+#ltitle.title-swap { animation: title-in var(--dur-base) var(--ease-out); }
+@keyframes title-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 #toggle-legend-btn { background: none; border: none; color: var(--text-dim); font-size: 14px; cursor: pointer; }
-#lbody { margin-top: 12px; } .collapsed #lbody { display: none; }
+/* Сворачивание легенды: grid-rows 1fr→0fr + fade — без анимации height */
+.lbody-wrap { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--dur-slow) var(--ease-out); }
+#legend.collapsed .lbody-wrap { grid-template-rows: 0fr; }
+#lbody { overflow: hidden; min-height: 0; margin-top: 12px; opacity: 1; transition: opacity var(--dur-base) var(--ease-out), margin-top var(--dur-slow) var(--ease-out); }
+#legend.collapsed #lbody { opacity: 0; margin-top: 0; }
+/* Градиентная шкала спутниковых grayscale-каналов */
+#lbody .lgrad { height: 10px; border-radius: 5px; margin-bottom: 4px; box-shadow: 0 0 0 1px rgba(0,0,0,0.2); }
+#lbody .lgrad-cap { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-dim); margin-bottom: 8px; }
+#lbody .legend-note { font-size: 10px; color: var(--text-dim); }
 /* Строки легенды: stagger-появление при перестроении (задержка через --i из script.js) */
 .li { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 12px; color: var(--text); font-weight: 500; animation: li-in var(--dur-base) var(--ease-out) both; animation-delay: calc(var(--i, 0) * 35ms); }
 @keyframes li-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
@@ -118,7 +137,9 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 /* Однократный поворот-появление иконки при смене ▶/⏸ (класс перевешивается из JS) */
 #playbtn.pop { animation: icon-swap 0.32s var(--ease-out); }
 @keyframes icon-swap { 0% { transform: scale(0.7) rotate(-90deg); } 100% { transform: scale(1) rotate(0deg); } }
-#track { flex: 1; position: relative; height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; cursor: pointer; transition: background-color var(--dur-base) var(--ease-out); }
+#track { flex: 1; position: relative; height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; cursor: pointer; transition: background-color var(--dur-base) var(--ease-out); touch-action: none; }
+/* Расширенная hit-area для пальца (±14px), видимая высота не меняется */
+#track::before { content: ''; position: absolute; left: 0; right: 0; top: -14px; bottom: -14px; }
 #track:hover { background: rgba(255, 255, 255, 0.15); }
 /* Прогресс и thumb анимируются через transform (не left/width) — стабильные 60fps.
    Значения transform задаёт updThumb() в script.js */
@@ -146,7 +167,14 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 #pulse::after { content: 'Данные актуальны'; position: absolute; top: calc(100% + 10px); right: -6px; background: var(--glass-bg-solid); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); padding: 5px 10px; font-size: 10px; font-weight: 600; color: var(--text); white-space: nowrap; opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out); pointer-events: none; }
 #pulse.busy::after { content: 'Загрузка данных…'; }
 #pulse:hover::after { opacity: 1; transform: translateY(0); }
-#dbg { position: fixed; bottom: 70px; left: 16px; font-size: 11px; color: var(--text-dim); z-index: 1000; pointer-events: none; font-weight: 600; transition: color var(--dur-base) var(--ease-out); }
+/* Статус-чип: слой · время кадра · загрузка (стеклянная капсула вместо сырого текста) */
+#dbg { position: fixed; bottom: 70px; left: 16px; font-size: 11px; color: var(--text-dim); z-index: 1000; pointer-events: none; font-weight: 600; background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 999px; padding: 5px 12px; box-shadow: var(--shadow-sm); white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; transition: opacity var(--dur-base) var(--ease-out), background-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out); }
+#dbg:empty { display: none; }
+
+/* Toast: снизу по центру, fade+slide, очередь (создаётся из script.js) */
+#toast { position: fixed; bottom: 88px; left: 50%; z-index: 5000; background: var(--glass-bg-solid); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid var(--glass-border); border-radius: 999px; padding: 8px 16px; font-size: 12px; font-weight: 600; color: var(--text); box-shadow: var(--shadow); pointer-events: none; opacity: 0; transform: translate(-50%, 8px); transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out); max-width: calc(100vw - 32px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
 #hover-indicator { position: fixed; pointer-events: none; z-index: 500; display: none; border: 1px solid #fff; box-shadow: 0 0 0 1px #000; }
 #crosshair { position: fixed; left: 50vw; top: 50vh; z-index: 600; pointer-events: none; display: none; }
 .ch-h { position: absolute; left: -30px; width: 60px; height: 1px; top: 0; background: #fff; }
@@ -207,7 +235,9 @@ html, body { height: 100%; background: var(--bg); font-family: 'Manrope', -apple
 
 /* ─── СВЕТЛАЯ ТЕМА ─── */
 body.light-theme { background: #f0f2f5 !important; color: #1a1a1a !important; }
-body.light-theme .panel, body.light-theme .restore-btn, body.light-theme #pixel-popup, body.light-theme #crosshair-label, body.light-theme #time-tooltip, body.light-theme .modal-content { background: rgba(255, 255, 255, 0.6) !important; border-color: rgba(0, 0, 0, 0.05) !important; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important; }
+body.light-theme .panel, body.light-theme .restore-btn, body.light-theme #pixel-popup, body.light-theme #crosshair-label, body.light-theme #time-tooltip, body.light-theme .modal-content, body.light-theme #dbg, body.light-theme #toast { background: rgba(255, 255, 255, 0.6) !important; border-color: rgba(0, 0, 0, 0.05) !important; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important; }
+body.light-theme #dbg { color: rgba(0,0,0,0.6); }
+body.light-theme #toast { color: #1a1a1a; background: rgba(255, 255, 255, 0.9) !important; }
 body.light-theme .btn { color: rgba(0, 0, 0, 0.62); }
 body.light-theme .btn:hover { background: rgba(0, 0, 0, 0.05); color: #000; }
 body.light-theme .btn.on { background: var(--accent); color: #fff; }
@@ -241,8 +271,14 @@ body.light-theme .tt-date { color: rgba(0,0,0,0.5) !important; }
 /* ─── Плавный переход тёмная/светлая тема ─── */
 body { transition: background-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out); }
 /* Только элементы без собственных transition-списков — чтобы не перебить анимации
-   дропдауна, модалок и restore-кнопок, определённые выше */
-.panel, #crosshair-label, .leaflet-control-scale { transition: background-color 280ms var(--ease-in-out), border-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out), box-shadow 280ms var(--ease-in-out); }
+   дропдауна, модалок и restore-кнопок, определённые выше.
+   opacity/transform — для плавного closePanel/restorePanel (.panel-hide) */
+.panel, #crosshair-label, .leaflet-control-scale { transition: background-color 280ms var(--ease-in-out), border-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out), box-shadow 280ms var(--ease-in-out), opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out); }
+
+/* ─── Сворачивание панелей (closePanel/restorePanel): scale+fade, display — после transitionend ─── */
+#legend.panel-hide { opacity: 0; transform: translateY(8px) scale(0.97); }
+#ctrl.panel-hide { opacity: 0; transform: translate(-50%, -8px) scale(0.97); }
+#tl.panel-hide { opacity: 0; transform: translate(-50%, 8px) scale(0.97); }
 
 /* ─── Типографика: единая шкала ─── */
 #legend-header h3 { letter-spacing: 1.2px; }
@@ -265,12 +301,23 @@ body { transition: background-color 280ms var(--ease-in-out), color 280ms var(--
   .btn:active, #playbtn:active, .modal-close:active { transform: none; }
 }
 
-/* ─── АДАПТИВ ДЛЯ ТЕЛЕФОНОВ (перенесено из script.js, где ломало парсинг) ─── */
+/* ─── АДАПТИВ ДЛЯ ТЕЛЕФОНОВ ─── */
 @media (max-width: 768px) {
-  #ctrl { top: 8px; padding: 4px; gap: 2px; border-radius: var(--radius-md); max-width: calc(100vw - 16px); }
-  .btn { padding: 6px 9px; font-size: 10px; border-radius: 6px; }
+  /* Тулбар: один ряд с горизонтальным скроллом — карта не загорожена 2–3 рядами кнопок.
+     Выбрано вместо группировки «⋯»: ноль JS-перестановок DOM, все обработчики целы */
+  #ctrl { top: 8px; padding: 4px; gap: 2px; border-radius: var(--radius-md); max-width: calc(100vw - 16px); flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  #ctrl::-webkit-scrollbar { display: none; }
+  .btn { padding: 6px 9px; font-size: 10px; border-radius: 6px; flex-shrink: 0; }
   .icon-btn { padding: 6px 7px; font-size: 12px; min-width: 32px; }
   .sep { display: none; }
+  #smooth-control, #opacity-control { flex-shrink: 0; }
+
+  /* #pulse — под тулбаром, не пересекается с ним */
+  #pulse { top: 62px; right: 10px; }
+  #pulse::after { right: -2px; }
+
+  /* Статус-чип — по центру под тулбаром, в безопасной зоне (не наезжает на легенду/таймлайн) */
+  #dbg { top: 58px; bottom: auto; left: 50%; transform: translateX(-50%); font-size: 10px; padding: 4px 10px; }
 
   #tl { bottom: 8px; padding: 6px 10px; border-radius: var(--radius-md); width: calc(100vw - 16px); gap: 8px; }
   #playbtn { width: 32px; height: 32px; font-size: 12px; }
@@ -284,9 +331,19 @@ body { transition: background-color 280ms var(--ease-in-out), color 280ms var(--
   .create-form .row { flex-wrap: wrap; }
   .create-form .row input[type="number"] { width: 60px; }
 
-  /* Дропдаун слоёв не должен уходить за экран */
-  .dropdown-menu { max-width: calc(100vw - 16px); }
+  /* Дропдауны не должны уходить за экран */
+  .dropdown-menu { max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto; }
+
+  /* Toast над мобильным таймлайном */
+  #toast { bottom: 96px; }
+
+  /* Blur дешевле на слабых GPU */
+  .panel, .restore-btn, #pixel-popup, #crosshair-label, #time-tooltip { backdrop-filter: blur(12px) saturate(150%); -webkit-backdrop-filter: blur(12px) saturate(150%); }
+  .dropdown-menu, .modal-content { backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%); }
 }
+
+/* При перетаскивании карты на таче панели приглушаются — карту видно целиком */
+body.map-drag #ctrl, body.map-drag #legend, body.map-drag #tl, body.map-drag #dbg { opacity: 0.35; }
 
 /* ─── Тач-таргеты ≥ 40px на сенсорных устройствах ─── */
 @media (pointer: coarse) {
