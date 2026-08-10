@@ -20,7 +20,7 @@
         el.classList.remove('panel-hide');
       };
       el.addEventListener('transitionend', done);
-      setTimeout(done, 420); /* страховка: чуть больше --dur-slow (320мс) выезда */
+      setTimeout(done, 560); /* страховка: чуть больше --dur-drawer (500мс) выезда */
     }
     var rb = $('restore-' + id); if (rb) { rb.style.display = 'block'; rb.setAttribute('aria-expanded', 'false'); }
   };
@@ -346,72 +346,20 @@
     return new SatWMS(SAT_WMS_ENDPOINTS[satEndpointIdx], params);
   }
 
-  /* ═══ БЛОК D: калибровка данных ═══
-     Спутник: сырая яркость 0–255 → калибровочная кривая (авто-контраст по перцентилям
-     p2/p98 ИЛИ ручные offset/gain/gamma) → пороги палитры.
-     Радар: dbz_cal = raw*dbzGain + dbzOffset перед сравнением с порогами палитры.
-     Ключ localStorage 'calibration' — НОВЫЙ (mapView не трогаем: калибровка — про данные,
-     а не про вид карты, и живёт по своим правилам сброса). */
-  var CAL = { sat: { offset: 0, gain: 1, gamma: 1, auto: true }, radar: { dbzOffset: 0, dbzGain: 1 } };
-  try {
-    var savedCal = JSON.parse(localStorage.getItem('calibration') || 'null');
-    if (savedCal && typeof savedCal === 'object') {
-      if (savedCal.sat) { CAL.sat.offset = +savedCal.sat.offset || 0; CAL.sat.gain = +savedCal.sat.gain || 1; CAL.sat.gamma = +savedCal.sat.gamma || 1; CAL.sat.auto = savedCal.sat.auto !== false; }
-      if (savedCal.radar) { CAL.radar.dbzOffset = +savedCal.radar.dbzOffset || 0; CAL.radar.dbzGain = +savedCal.radar.dbzGain || 1; }
-    }
-  } catch (e) {}
-  function saveCalibration() { try { localStorage.setItem('calibration', JSON.stringify(CAL)); } catch (e) {} }
-  /* Авто-контраст: перцентили p2/p98 гистограммы первого обработанного тайла канала
-     (устойчивы к выбросам); сбрасываются при смене канала и по ↻ */
-  var satAutoStretch = {}; /* { chId: {p2, p98} } */
-  function computeAutoStretch(chId, d) { /* d — ImageData.data 256×256 */
-    var hist = new Uint32Array(256), n = 0;
-    for (var i = 0; i < d.length; i += 16) { /* каждый 4-й пиксель — достаточно для гистограммы */
-      if (!d[i + 3]) continue;
-      hist[((d[i] + d[i + 1] + d[i + 2]) / 3) | 0]++; n++;
-    }
-    if (n < 500) return null; /* почти пустой тайл — не по чему калиброваться */
-    var lo = Math.round(n * 0.02), hi = Math.round(n * 0.98), acc = 0, p2 = 0, p98 = 255;
-    for (var v = 0; v < 256; v++) { acc += hist[v]; if (acc >= lo) { p2 = v; break; } }
-    acc = 0;
-    for (var w = 0; w < 256; w++) { acc += hist[w]; if (acc >= hi) { p98 = w; break; } }
-    if (p98 - p2 < 10) return null; /* вырожденная гистограмма */
-    satAutoStretch[chId] = { p2: p2, p98: p98 };
-    return satAutoStretch[chId];
-  }
-  function satCalIsIdentity() {
-    if (CAL.sat.auto) { var st = satAutoStretch[SAT_CHANNELS[satChIdx].id]; return !st || (st.p2 <= 5 && st.p98 >= 250); }
-    return CAL.sat.offset === 0 && CAL.sat.gain === 1 && CAL.sat.gamma === 1;
-  }
-  function satCalValue(v, st) { /* калибровочная кривая яркости */
-    if (CAL.sat.auto) { if (st) v = (v - st.p2) / (st.p98 - st.p2) * 255; }
-    else {
-      v = (v - CAL.sat.offset) * CAL.sat.gain;
-      if (CAL.sat.gamma !== 1) v = Math.pow(Math.max(0, v) / 255, CAL.sat.gamma) * 255;
-    }
-    return v < 0 ? 0 : (v > 255 ? 255 : v);
-  }
-  function satCalSignature() { if (CAL.sat.auto) { var st = satAutoStretch[SAT_CHANNELS[satChIdx].id]; return st ? 'a' + st.p2 + ':' + st.p98 : 'a'; } return 'm' + CAL.sat.offset + ',' + CAL.sat.gain + ',' + CAL.sat.gamma; }
-  function calDbz(v) { return v * CAL.radar.dbzGain + CAL.radar.dbzOffset; }
-  function radarCalIsDefault() { return CAL.radar.dbzOffset === 0 && CAL.radar.dbzGain === 1; }
-
-  /* ─── Реколоризация + калибровка grayscale-тайла (через procQueue, ≤8мс/кадр).
-     Обрабатываем тайл, если есть палитра-перекраска ИЛИ калибровка не тождественна
-     (тогда для noRecolor-палитр выводим откалиброванный серый) ─── */
+  /* ─── Реколоризация grayscale-тайла по палитре канала (через procQueue, ≤8мс/кадр).
+     Данные показываются «как есть»: пиксель ищется в палитре по сырой яркости ─── */
   function satPalSignature(pal) { return pal.name + '|' + pal.items.map(function(i) { return i.v + ':' + i.r.join(','); }).join(';'); }
   function recolorSatTile(tile) {
     var ch = SAT_CHANNELS[satChIdx];
     if (!ch.gray) return;
     var pal = satActivePalette();
-    var wantRecolor = pal && !pal.noRecolor && !pal.legendOnly && pal.items && pal.items.length;
-    var wantCal = !satCalIsIdentity() || (CAL.sat.auto && !satAutoStretch[ch.id]); /* авто без статистики — нужно её собрать */
-    if (!wantRecolor && !wantCal) return;
-    var key = tile._satUrl + '§' + (wantRecolor ? satPalSignature(pal) : 'gray') + '§' + satCalSignature();
+    if (!pal || pal.noRecolor || pal.legendOnly || !pal.items || !pal.items.length) return;
+    var key = tile._satUrl + '\u00a7' + satPalSignature(pal);
     var hit = satRecolorCache.get(key);
     /* Подмена src — тоже через очередь: гарантирует, что кэширование ОРИГИНАЛА
        (задание поставлено раньше в tileload) успеет отработать до перекраски */
     if (hit) { enqueueTile({ run: function() { if (!tile._satAborted) { tile._recolored = true; tile.src = hit; } } }); return; }
-    var items = wantRecolor ? pal.items : null; /* отсортированы по v убыв. */
+    var items = pal.items; /* отсортированы по v убыв. */
     enqueueTile({ run: function() {
       try {
         if (tile._satAborted) return;
@@ -419,17 +367,12 @@
         var cc = c.getContext('2d');
         cc.drawImage(tile, 0, 0, 256, 256);
         var idd = cc.getImageData(0, 0, 256, 256), d = idd.data;
-        /* Первый тайл канала при авто-калибровке — источник гистограммы */
-        var st = CAL.sat.auto ? (satAutoStretch[ch.id] || computeAutoStretch(ch.id, d)) : null;
-        if (!items && satCalIsIdentity()) return; /* после статистики выяснилось: менять нечего */
         for (var i = 0; i < d.length; i += 4) {
           if (!d[i + 3]) continue; /* прозрачное — не трогаем */
-          var v = satCalValue((d[i] + d[i + 1] + d[i + 2]) / 3, st);
-          if (items) {
-            for (var j = 0; j < items.length; j++) {
-              if (v >= items[j].v) { d[i] = items[j].r[0]; d[i + 1] = items[j].r[1]; d[i + 2] = items[j].r[2]; break; }
-            }
-          } else { d[i] = d[i + 1] = d[i + 2] = v | 0; } /* noRecolor: откалиброванный серый */
+          var v = (d[i] + d[i + 1] + d[i + 2]) / 3; /* сырая яркость, без калибровки */
+          for (var j = 0; j < items.length; j++) {
+            if (v >= items[j].v) { d[i] = items[j].r[0]; d[i + 1] = items[j].r[1]; d[i + 2] = items[j].r[2]; break; }
+          }
         }
         cc.putImageData(idd, 0, 0);
         var du = c.toDataURL();
@@ -644,8 +587,7 @@
     var prog = satLoading ? ' · ⏳' + Math.min(satTilesDone, satTilesTotal) + '/' + satTilesTotal : '';
     var errTxt = err ? (satErrType === 'timeout' ? ' · ⚠️ таймаут' : ' · ⚠️ сеть/сервер') : '';
     var bd = satBackdropActive() ? ' · подложка' : '';
-    var scal = (!CAL.sat.auto && !satCalIsIdentity()) ? ' · калибр.' : '';
-    setChip('🛰 ' + ch.label + ' · ' + tstr + ' МСК' + (live ? ' (LIVE, ~15 мин задержка)' : '') + prog + errTxt + bd + scal + ' · непрозр. 50% · © EUMETSAT');
+    setChip('🛰 ' + ch.label + ' · ' + tstr + ' МСК' + (live ? ' (LIVE, ~15 мин задержка)' : '') + prog + errTxt + bd + ' · непрозр. 50% · © EUMETSAT');
   }
 
   /* ─── Применение времени/канала спутника: новый WMS-слой поверх, старый снимается
@@ -722,7 +664,7 @@
   function tileRect(x, y) { var nw = map.latLngToContainerPoint(L.latLng(y2lat(y, FZ), x2lon(x, FZ))); var se = map.latLngToContainerPoint(L.latLng(y2lat(y + 1, FZ), x2lon(x + 1, FZ))); return { sx: Math.round(nw.x), sy: Math.round(nw.y), sw: Math.round(se.x - nw.x), sh: Math.round(se.y - nw.y) }; }
   function makeCK(l, t, p, x, y) { return l + '|' + t + '|' + p + '|' + x + '|' + y; }
   function CK(x, y) { return makeCK(S.layer, S.ts, S.px, x, y); }
-  function getColor(raw) { if (raw < MDBZ) return null; var v = calDbz(raw); /* калибровка dBZ (Блок D) */ var items = getCurrentPaletteItems(); for (var i = 0; i < items.length; i++) { if (v >= items[i].v) return items[i].r; } return null; }
+  function getColor(raw) { if (raw < MDBZ) return null; var items = getCurrentPaletteItems(); for (var i = 0; i < items.length; i++) { if (raw >= items[i].v) return items[i].r; } return null; }
 
   function interpolateRaw(raw, w, h, scale) {
     var nw = w * scale, nh = h * scale; var newRaw = new Float32Array(nw * nh);
@@ -822,8 +764,7 @@
     /* Статус-чип: слой · время кадра МСК · загрузка */
     var lname = S.layer === 'radar' ? 'dBZ' : 'ОЯ';
     var tstr = new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-    var calMark = radarCalIsDefault() ? '' : ' · калибр. ' + (CAL.radar.dbzOffset > 0 ? '+' : '') + CAL.radar.dbzOffset + 'дБ' + (CAL.radar.dbzGain !== 1 ? '/' + CAL.radar.dbzGain + '×' : '');
-    setChip(lname + ' · ' + tstr + ' МСК' + calMark + (miss > 0 ? ' · ⏳' + miss : ''));
+    setChip(lname + ' · ' + tstr + ' МСК' + (miss > 0 ? ' · ⏳' + miss : ''));
     if (S.layer === 'wx') { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.beginPath(); for (var gi = 0; gi < tiles.length; gi++) { var gt = tiles[gi], gr = tileRect(gt.x, gt.y); if (gr.sw <= 0 || gr.sh <= 0) continue; var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY; if (bW < 1 || bH < 1) continue; var cols = Math.ceil(256 / S.px); for (var ci = 0; ci <= cols; ci++) { var lx = gr.sx + Math.round(ci * bW) + 0.5; ctx.moveTo(lx, gr.sy); ctx.lineTo(lx, gr.sy + gr.sh); } for (var ri = 0; ri <= cols; ri++) { var ly = gr.sy + Math.round(ri * bH) + 0.5; ctx.moveTo(gr.sx, ly); ctx.lineTo(gr.sx + gr.sw, ly); } } ctx.stroke(); ctx.restore(); }
   }
 
@@ -839,7 +780,6 @@
     if (S.layer === 'sat') { 
       /* Пересоздаём слой с сохранением выбранного канала и времени кадра */
       satErrToastTs = 0;
-      delete satAutoStretch[SAT_CHANNELS[satChIdx].id]; /* пересчитать авто-контраст на свежем кадре */
       satApplyTime(true);
       buildFrames(); updHUD();
       toast('Спутник обновлён'); 
@@ -961,7 +901,6 @@
   function setSatChannel(idx) {
     if (idx < 0 || idx >= SAT_CHANNELS.length || idx === satChIdx) { $('channel-dropdown').classList.remove('visible'); return; }
     satChIdx = idx;
-    delete satAutoStretch[SAT_CHANNELS[idx].id]; /* авто-контраст пересчитается по новому каналу */
     try { localStorage.setItem('satChannel', SAT_CHANNELS[idx].id); } catch (e) {}
     var ch = SAT_CHANNELS[idx];
     $('btn-channel').textContent = 'Канал: ' + ch.label;
@@ -1052,70 +991,12 @@
       var opn = document.createElement('div'); opn.className = 'li legend-note'; opn.style.setProperty('--i', Math.min(idx++, 14)); opn.textContent = 'Прозрачность слоя: 50%'; el.appendChild(opn);
       /* Обязательная атрибуция по лицензии EUMETSAT */
       var attr = document.createElement('div'); attr.className = 'li legend-note'; attr.style.setProperty('--i', Math.min(idx++, 14)); attr.textContent = '© EUMETSAT'; el.appendChild(attr);
-      if (ch.gray) buildCalSection(el, 'sat'); /* калибровка яркости — только для grayscale-каналов */
       return;
     }
     var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; setLegendTitle(title); 
     items.forEach(function(p, i) { var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14)); var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
-    buildCalSection(el, 'radar');
   }
 
-  /* ─── UI калибровки в легенде: секция живёт в контексте слоя, результат виден сразу.
-     Слайдеры применяются с дебаунсом 180мс (сброс кэшей → перерисовка через существующие пути) ─── */
-  var calOpen = false, calApplyTmr = null;
-  function calApplyDebounced() {
-    clearTimeout(calApplyTmr);
-    calApplyTmr = setTimeout(function() {
-      saveCalibration();
-      /* forceRefresh: для радара чистит S.cache (цвета впечатаны в тайлы),
-         для спутника — satRecolorCache + пересоздание слоя */
-      forceRefresh();
-      schedRender();
-    }, 180);
-  }
-  function calSlider(parent, label, min, max, step, val, onInput) {
-    var row = document.createElement('div'); row.className = 'cal-row';
-    var lab = document.createElement('label'); lab.textContent = label;
-    var inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = val;
-    var out = document.createElement('span'); out.className = 'cal-val'; out.textContent = val;
-    inp.addEventListener('input', function() { out.textContent = this.value; retrig(out, 'bump'); onInput(parseFloat(this.value)); calApplyDebounced(); });
-    row.appendChild(lab); row.appendChild(inp); row.appendChild(out);
-    parent.appendChild(row);
-    return inp;
-  }
-  function buildCalSection(el, kind) {
-    var wrap = document.createElement('div'); wrap.className = 'cal-section';
-    var head = document.createElement('button'); head.className = 'cal-head'; head.type = 'button';
-    head.setAttribute('aria-expanded', calOpen ? 'true' : 'false');
-    head.textContent = '⚙ Калибровка' + ((kind === 'radar' && !radarCalIsDefault()) || (kind === 'sat' && !CAL.sat.auto) ? ' •' : '');
-    var body = document.createElement('div'); body.className = 'cal-body' + (calOpen ? ' open' : '');
-    head.addEventListener('click', function() { calOpen = !calOpen; body.classList.toggle('open', calOpen); head.setAttribute('aria-expanded', calOpen ? 'true' : 'false'); });
-    if (kind === 'sat') {
-      var note = document.createElement('div'); note.className = 'cal-note';
-      note.textContent = CAL.sat.auto ? 'Авто-контраст (перцентили 2–98)' : 'Ручной режим';
-      body.appendChild(note);
-      /* Ручные слайдеры: движение отключает авто */
-      calSlider(body, 'Яркость', -100, 100, 5, CAL.sat.offset, function(v) { CAL.sat.auto = false; CAL.sat.offset = v; note.textContent = 'Ручной режим'; });
-      calSlider(body, 'Контраст', 0.5, 2, 0.05, CAL.sat.gain, function(v) { CAL.sat.auto = false; CAL.sat.gain = v; note.textContent = 'Ручной режим'; });
-      calSlider(body, 'Гамма', 0.4, 2.5, 0.05, CAL.sat.gamma, function(v) { CAL.sat.auto = false; CAL.sat.gamma = v; note.textContent = 'Ручной режим'; });
-      var btns = document.createElement('div'); btns.className = 'cal-btns';
-      var bAuto = document.createElement('button'); bAuto.className = 'btn'; bAuto.textContent = 'Авто';
-      bAuto.addEventListener('click', function() { CAL.sat.auto = true; delete satAutoStretch[SAT_CHANNELS[satChIdx].id]; buildLegend(); calApplyDebounced(); });
-      var bReset = document.createElement('button'); bReset.className = 'btn'; bReset.textContent = 'Сброс';
-      bReset.addEventListener('click', function() { CAL.sat = { offset: 0, gain: 1, gamma: 1, auto: true }; delete satAutoStretch[SAT_CHANNELS[satChIdx].id]; buildLegend(); calApplyDebounced(); });
-      btns.appendChild(bAuto); btns.appendChild(bReset); body.appendChild(btns);
-    } else {
-      /* Радар: авто-калибровку намеренно НЕ делаем — молча искажать метеоданные нельзя;
-         только ручная подстройка с пометкой в статус-чипе */
-      calSlider(body, 'Сдвиг dBZ', -10, 10, 1, CAL.radar.dbzOffset, function(v) { CAL.radar.dbzOffset = v; });
-      calSlider(body, 'Масштаб', 0.8, 1.2, 0.05, CAL.radar.dbzGain, function(v) { CAL.radar.dbzGain = v; });
-      var btns2 = document.createElement('div'); btns2.className = 'cal-btns';
-      var bReset2 = document.createElement('button'); bReset2.className = 'btn'; bReset2.textContent = 'Сброс';
-      bReset2.addEventListener('click', function() { CAL.radar = { dbzOffset: 0, dbzGain: 1 }; buildLegend(); calApplyDebounced(); });
-      btns2.appendChild(bReset2); body.appendChild(btns2);
-    }
-    wrap.appendChild(head); wrap.appendChild(body); el.appendChild(wrap);
-  }
   function toggleLegend() { var lg = $('legend'), btn = $('toggle-legend-btn'); if (S.legendVis) { lg.classList.add('collapsed'); btn.innerHTML = '+'; } else { lg.classList.remove('collapsed'); btn.innerHTML = '−'; } S.legendVis = !S.legendVis; saveViewDebounced(); }
   /* ─── Toast: отдельный элемент снизу по центру, fade+slide, очередь сообщений.
      Сигнатура toast(m) сохранена — все существующие вызовы работают ─── */
@@ -1174,7 +1055,7 @@
         var pd = entry.canvas.getContext('2d').getImageData(cx2, cy2, 1, 1).data; 
         if (!pd[3]) return null; 
         var scX = r.sw / targetSize; var scY = r.sh / targetSize; var dbz = -1; 
-        if (entry.raw && entry.raw.length > 0) { var ix = Math.round(cx2); var iy = Math.round(cy2); if (ix >= 0 && ix < targetSize && iy >= 0 && iy < targetSize) { var rawIdx = iy * targetSize + ix; if (rawIdx < entry.raw.length) { dbz = entry.raw[rawIdx]; if (dbz >= 0) dbz = calDbz(dbz); } } } 
+        if (entry.raw && entry.raw.length > 0) { var ix = Math.round(cx2); var iy = Math.round(cy2); if (ix >= 0 && ix < targetSize && iy >= 0 && iy < targetSize) { var rawIdx = iy * targetSize + ix; if (rawIdx < entry.raw.length) { dbz = entry.raw[rawIdx]; } } } 
         return { sx: r.sx + Math.round(bx * scX), sy: r.sy + Math.round(by * scY), sw: Math.max(4, Math.round(effectivePx * scX)), sh: Math.max(4, Math.round(effectivePx * scY)), color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')', r: pd[0], g: pd[1], b: pd[2], info: findPalEntry(pd[0], pd[1], pd[2]), dbz: dbz }; 
       } catch (e) { return null; } 
     } 
@@ -1478,7 +1359,7 @@
       else { var pl = palettes[S.layer]; palName = pl.list[pl.activeIdx].name; }
     } catch (e) {}
     return {
-      generator: 'tatmeteo | КиберРадар',
+      generator: 'Tatmeteo',
       frame_time_msk: new Date(S.ts * 1000).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }),
       layer: S.layer,
       sat_channel: S.layer === 'sat' ? SAT_CHANNELS[satChIdx].id : undefined,
@@ -1492,10 +1373,6 @@
       width_px: rc.w, height_px: rc.h,
       resolution_km: S.layer === 'sat' ? undefined : (S.px * BASE_RES_KM),
       palette: palName,
-      /* Применённая калибровка (Блок D) — чтобы данные были воспроизводимы */
-      calibration: S.layer === 'sat'
-        ? (CAL.sat.auto ? { mode: 'auto', stretch: satAutoStretch[SAT_CHANNELS[satChIdx].id] || null } : { mode: 'manual', offset: CAL.sat.offset, gain: CAL.sat.gain, gamma: CAL.sat.gamma })
-        : { dbzOffset: CAL.radar.dbzOffset, dbzGain: CAL.radar.dbzGain },
       missing_tiles: rc.missing ? rc.missing + ' из ' + rc.total + ' тайлов не были загружены на момент экспорта' : undefined,
       attribution: (S.layer === 'sat' ? '© EUMETSAT' : 'rainradar.ru') + (isComposite ? ' · базовая карта © OpenStreetMap, © CARTO' : '')
     };
@@ -1527,7 +1404,7 @@
             var v = entry.raw[iy * W + ix];
             if (!(v >= MDBZ)) continue; /* только ячейки с данными */
             var lat = y2lat(t.y + fy, FZ), lng = x2lon(t.x + fx, FZ);
-            rows.push(lat.toFixed(4) + ',' + lng.toFixed(4) + ',' + Math.round(calDbz(v))); /* экспортируем откалиброванный dBZ */
+            rows.push(lat.toFixed(4) + ',' + lng.toFixed(4) + ',' + Math.round(v)); /* сырые dBZ, без преобразований */
           }
         }
       }
@@ -1536,7 +1413,6 @@
       var head = '# tatmeteo radar export (dBZ)\n# frame_time_msk: ' + meta.frame_time_msk +
         '\n# layer: ' + meta.layer + ' | zoom: ' + meta.zoom + ' | resolution_km: ' + meta.resolution_km +
         '\n# grid_stride: ' + stride + (skippedTiles ? ' | missing_tiles: ' + skippedTiles : '') +
-        '\n# calibration: dbzOffset=' + CAL.radar.dbzOffset + ' dbzGain=' + CAL.radar.dbzGain +
         '\nlat,lng,dbz\n';
       downloadBlob(new Blob([head + rows.join('\n') + '\n'], { type: 'text/csv;charset=utf-8' }), baseName + '.csv');
       onDone();
@@ -1744,6 +1620,7 @@
     } catch (e) { /* битые данные — остаёмся на дефолте */ }
   }
 
+  try { localStorage.removeItem('calibration'); } catch (e) {} /* калибровка удалена — чистим старый ключ */
   loadPalettesFromStorage(); applyTheme('dark', false); restoreView(); buildLegend(); buildFrames(); updHUD(); updatePxLabel(); applyDbzUI(); schedRender();
   /* После restoreView (и при первом заходе без сохранений): актуальный зум в чипе
      и повторный invalidateSize — на мобильных вьюпорт меняется из-за URL-бара */
@@ -1788,5 +1665,5 @@
   window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
 
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
-  console.log('2×2 Радар загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
+  console.log('Tatmeteo загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
 })();
