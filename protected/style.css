@@ -265,11 +265,12 @@ body.light-theme .tt-date { color: rgba(0,0,0,0.5) !important; }
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── Первичная загрузка: панели въезжают fade+translateY со stagger (< 500ms суммарно) ─── */
-@keyframes panel-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes panel-in-center { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
-#ctrl { animation: panel-in-center var(--dur-slow) var(--ease-out) backwards; }
-#legend { animation: panel-in var(--dur-slow) var(--ease-out) 60ms backwards; }
-#tl { animation: panel-in-center var(--dur-slow) var(--ease-out) 120ms backwards; }
+@keyframes drawer-in-top { from { transform: translate(-50%, -115%); } to { transform: translate(-50%, 0); } }
+@keyframes drawer-in-bottom { from { transform: translate(-50%, 115%); } to { transform: translate(-50%, 0); } }
+@keyframes drawer-in-right { from { transform: translateX(105%); } to { transform: translateX(0); } }
+#ctrl { animation: drawer-in-top var(--dur-slow) var(--ease-out) backwards; }
+#tl { animation: drawer-in-bottom var(--dur-slow) var(--ease-out) 120ms backwards; }
+#legend { animation: drawer-in-right var(--dur-slow) var(--ease-out) 240ms backwards; }
 #pulse { animation: fade-in var(--dur-slow) var(--ease-out) 180ms backwards; }
 
 /* ─── Плавный переход тёмная/светлая тема ─── */
@@ -277,12 +278,13 @@ body { transition: background-color 280ms var(--ease-in-out), color 280ms var(--
 /* Только элементы без собственных transition-списков — чтобы не перебить анимации
    дропдауна, модалок и restore-кнопок, определённые выше.
    opacity/transform — для плавного closePanel/restorePanel (.panel-hide) */
-.panel, #crosshair-label, .leaflet-control-scale { transition: background-color 280ms var(--ease-in-out), border-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out), box-shadow 280ms var(--ease-in-out), opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out); }
+.panel, #crosshair-label, .leaflet-control-scale { transition: background-color 280ms var(--ease-in-out), border-color 280ms var(--ease-in-out), color 280ms var(--ease-in-out), box-shadow 280ms var(--ease-in-out), opacity var(--dur-base) var(--ease-out), transform var(--dur-slow) var(--ease-out); }
 
-/* ─── Сворачивание панелей (closePanel/restorePanel): scale+fade, display — после transitionend ─── */
-#legend.panel-hide { opacity: 0; transform: translateY(8px) scale(0.97); }
-#ctrl.panel-hide { opacity: 0; transform: translate(-50%, -8px) scale(0.97); }
-#tl.panel-hide { opacity: 0; transform: translate(-50%, 8px) scale(0.97); }
+/* ─── БЛОК C: панели-ящики. Скрытие = выезд за свой край экрана «в стену»
+   (правый ящик — вправо, верхний — вверх, нижний — вниз), display — после transitionend ─── */
+#legend.panel-hide { transform: translateX(105%); }
+#ctrl.panel-hide { transform: translate(-50%, -115%); }
+#tl.panel-hide { transform: translate(-50%, 115%); }
 
 /* ─── Типографика: единая шкала ─── */
 #legend-header h3 { letter-spacing: 1.2px; }
@@ -455,4 +457,61 @@ body.light-theme #zoom-indicator { background: rgba(255, 255, 255, 0.6) !importa
   .btn { padding: 5px 7px; font-size: 9.5px; }
   .icon-btn { min-width: 30px; padding: 5px 6px; }
   #ctrl { padding: 3px; }
+}
+
+/* ═══ Этап 6: ящики у краёв, калибровка, полировка ═══ */
+
+/* ─── Панели примыкают к своим краям: скругление только со стороны карты ─── */
+/* Верхний ящик (тулбар): «из-под потолка» */
+#ctrl { top: 0; border-radius: 0 0 var(--radius-lg) var(--radius-lg); border-top: none; padding: 8px 6px 6px; }
+/* Нижний ящик (таймлайн): «из-под пола» */
+#tl { bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; border-bottom: none; padding: 12px 20px calc(14px + env(safe-area-inset-bottom, 0px)); }
+/* Правый ящик (легенда): «из стены» справа */
+#legend { right: 0; border-radius: var(--radius-lg) 0 0 var(--radius-lg); border-right: none; box-shadow: -8px 0 32px rgba(0, 0, 0, 0.3); }
+
+/* Restore-кнопки — на краю, откуда выезжает ящик */
+#restore-legend { right: 0; border-radius: var(--radius-md) 0 0 var(--radius-md); border-right: none; }
+#restore-tl { bottom: 0; border-radius: var(--radius-md) var(--radius-md) 0 0; border-bottom: none; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+
+/* Кнопки скрытия панелей (шевроны у края) */
+#hide-legend-btn, #hide-tl-btn { background: none; border: none; color: var(--text-dim); font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: 6px; line-height: 1; transition: color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out); }
+#hide-legend-btn:hover, #hide-tl-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+#hide-tl-btn { flex-shrink: 0; }
+
+/* ─── Секция «Калибровка» в легенде ─── */
+.cal-section { margin-top: 10px; border-top: 1px solid var(--glass-border); padding-top: 8px; }
+.cal-head { background: none; border: none; color: var(--text-dim); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; padding: 4px 6px; border-radius: 6px; width: 100%; text-align: left; font-family: inherit; transition: color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out); }
+.cal-head:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.cal-body { display: none; padding: 6px 2px 2px; }
+.cal-body.open { display: block; animation: fade-in var(--dur-base) var(--ease-out); }
+.cal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.cal-row label { font-size: 10px; color: var(--text-dim); font-weight: 600; width: 62px; flex-shrink: 0; }
+.cal-row input[type="range"] { flex: 1; min-width: 60px; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255,255,255,0.12); border-radius: 2px; outline: none; cursor: pointer; }
+.cal-row input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer; }
+.cal-row input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer; }
+.cal-val { font-size: 10px; font-weight: 700; color: var(--text); min-width: 30px; text-align: right; display: inline-block; }
+.cal-note { font-size: 9px; color: var(--text-dim); margin: 2px 0 6px; font-weight: 600; }
+.cal-btns { display: flex; gap: 6px; margin-top: 4px; }
+.cal-btns .btn { padding: 4px 10px; font-size: 10px; border: 1px solid var(--glass-border); }
+
+/* ─── Мобильные override'ы ящиков ─── */
+@media (max-width: 768px) {
+  #ctrl { top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); padding: calc(4px + env(safe-area-inset-top, 0px)) 4px 4px; }
+  #tl { bottom: 0; border-radius: var(--radius-md) var(--radius-md) 0 0; padding: 6px 10px calc(8px + env(safe-area-inset-bottom, 0px)); }
+  /* Правый ящик-легенда: от правого края, не на всю ширину — карта остаётся видна слева,
+     и ящик визуально «выезжает из стены»; не перекрывает таймлайн (bottom выше #tl) */
+  #legend { right: 0; left: auto; width: auto; min-width: 0; max-width: 85vw; bottom: calc(56px + env(safe-area-inset-bottom, 0px)); border-radius: var(--radius-md) 0 0 var(--radius-md); }
+  #restore-legend { right: 0; bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+  .cal-row label { width: 56px; }
+}
+
+/* reduced-motion: выезды ящиков гасятся глобальным правилом (duration→0.01ms),
+   но стартовые keyframes не должны оставлять панель за краем */
+@media (prefers-reduced-motion: reduce) {
+  #ctrl, #tl, #legend { animation: none; }
+}
+
+/* Чип #dbg на десктопе — чуть выше подросшего нижнего ящика */
+@media (min-width: 769px) {
+  #dbg { bottom: 88px; }
 }
