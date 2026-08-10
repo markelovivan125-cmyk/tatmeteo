@@ -47,6 +47,15 @@
       <button class="btn icon-btn" id="btn-crosshair" title="Прицел">⊕</button>
       <button class="btn" id="btn-ruler" title="Линейка">📏</button>
       <div class="sep"></div>
+      <!-- Экспорт видимой области: PNG / PNG+геопривязка / CSV -->
+      <div id="download-wrapper">
+        <button class="btn icon-btn" id="btn-download" title="Скачать данные радара">⬇</button>
+        <div class="dropdown-menu" id="download-dropdown">
+          <div class="dd-item" data-fmt="png" tabindex="0" role="button">🖼 PNG — снимок слоя</div>
+          <div class="dd-item" data-fmt="geo" tabindex="0" role="button">🗺 ZIP — PNG + .pgw + мета</div>
+          <div class="dd-item" data-fmt="csv" tabindex="0" role="button">📄 CSV — значения dBZ</div>
+        </div>
+      </div>
       <button class="btn icon-btn" id="btn-palettes" title="Палитры">🎨</button>
       <button class="btn" id="btn-help">Справка</button>
       <button class="btn" id="btn-theme">Тема</button>
@@ -142,5 +151,5 @@
     }, 15000);
   </script>
   <script src="script.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f9c889a13f12a',t:'MTc4NjM3MTMxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f9c889a13f12a',t:'MTc4NjM3MTMxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28fd10fae9df12a',t:'MTc4NjM3MzQ2NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
