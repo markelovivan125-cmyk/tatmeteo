@@ -1317,6 +1317,145 @@
 
   /* Композит: база (непрозрачно) + данные с той же прозрачностью, что на экране.
      Прозрачность «впечатывается» в пиксели через globalAlpha. */
+  /* ═══ БЛОК B: легенда, встроенная в композит «карта + слой» ═══
+     Данные берутся из ТОЙ ЖЕ логики, что buildLegend() (getCurrentPaletteItems /
+     SAT_CHANNELS[].legend / satActivePalette) — без дублирования таблиц. */
+  var LEGEND_POS = 'bottom-right'; /* привычный угол легенды; левый низ занят чипом,
+                                      верх — тулбаром; можно 'top-right'/'bottom-left' */
+
+  /* Сбор строк легенды для канваса: {title, grad[], gradCaps[], rows[[css-цвет, подпись]], notes[]} */
+  function collectLegendData() {
+    if (S.layer === 'sat') {
+      var ch = SAT_CHANNELS[satChIdx];
+      var out = { title: 'СПУТНИК · ' + ch.label.toUpperCase(), grad: null, gradCaps: null, rows: [], notes: [] };
+      var pal = satActivePalette();
+      if (pal && pal.items && pal.items.length && !pal.legendOnly) {
+        /* как в buildLegend: градиент по стопам палитры (v по возрастанию) + строки */
+        var asc = pal.items.slice().sort(function(a, b) { return a.v - b.v; });
+        out.grad = asc.map(function(it) { return 'rgb(' + it.r.join(',') + ')'; });
+        out.gradCaps = ['тепло', 'холодно'];
+        out.rows = pal.items.map(function(it) { return ['rgb(' + it.r.join(',') + ')', it.l]; });
+        if (pal.name) out.notes.push('Палитра: ' + pal.name);
+      } else {
+        var lg = ch.legend || {};
+        if (lg.grad) { out.grad = lg.grad; out.gradCaps = ['холодно', 'тепло']; }
+        (lg.rows || []).forEach(function(r) { out.rows.push([r[0], r[1]]); });
+      }
+      out.notes.push('Прозрачность слоя: 50%');
+      out.notes.push('© EUMETSAT');
+      return out;
+    }
+    var items = getCurrentPaletteItems();
+    var o = { title: S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ', grad: null, gradCaps: null, rows: [], notes: [] };
+    items.forEach(function(p) { o.rows.push(['rgb(' + p.r.join(',') + ')', p.l]); });
+    try { var pl = palettes[S.layer]; var pn = pl.list[pl.activeIdx].name; if (pn) o.notes.push('Палитра: ' + pn); } catch (e) {}
+    return o;
+  }
+
+  /* Скруглённый прямоугольник (fallback для браузеров без ctx.roundRect) */
+  function rrPath(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /* Отрисовка легенды в контекст композита. Контекст уже в CSS-пикселях
+     (setTransform(DPR,…) активен) — размеры считаем от innerWidth/innerHeight.
+     Легенда — часть растровых пикселей: .pgw НЕ меняется, геопривязка по краям
+     изображения сохраняется. */
+  function drawLegendToCanvas(octx) {
+    var data = collectLegendData();
+    var FONT_ROW = '600 11px Manrope, system-ui, sans-serif';
+    var FONT_TITLE = '700 11px Manrope, system-ui, sans-serif';
+    var FONT_NOTE = '600 9px Manrope, system-ui, sans-serif';
+    var PAD = 12, LINE = 17, SW = 10, GAP = 7, RAD = 10, MARGIN = 14;
+
+    /* wx-палитра — 20 строк: в две колонки по ≤10, длиннее 24 — обрезаем с «…» */
+    var rows = data.rows.slice(0, 24);
+    var truncated = data.rows.length > 24;
+    var perCol = rows.length > 10 ? Math.ceil(rows.length / 2) : rows.length;
+    var cols = rows.length > 10 ? 2 : 1;
+
+    octx.save();
+    /* Ширины колонок по реальному тексту */
+    octx.font = FONT_ROW;
+    var colW = [0, 0];
+    rows.forEach(function(r, i) {
+      var c = Math.floor(i / perCol);
+      colW[c] = Math.max(colW[c], SW + 6 + octx.measureText(r[1]).width);
+    });
+    octx.font = FONT_TITLE;
+    var titleW = octx.measureText(data.title).width;
+    octx.font = FONT_NOTE;
+    var noteW = 0;
+    data.notes.forEach(function(n) { noteW = Math.max(noteW, octx.measureText(n).width); });
+    if (truncated) data.notes.unshift('… показаны первые 24 строки');
+
+    var contentW = Math.max(titleW, noteW, colW[0] + (cols > 1 ? GAP * 2 + colW[1] : 0), data.grad ? 120 : 0);
+    var gradH = data.grad ? (8 + 13) : 0; /* полоса + подписи холодно/тепло */
+    var panelW = contentW + PAD * 2;
+    var panelH = PAD * 2 + 15 /* заголовок */ + 6 + gradH + perCol * LINE + (data.notes.length ? 4 + data.notes.length * 12 : 0);
+
+    /* Позиция по LEGEND_POS (по умолчанию правый нижний угол) */
+    var x = LEGEND_POS.indexOf('right') >= 0 ? innerWidth - panelW - MARGIN : MARGIN;
+    var y = LEGEND_POS.indexOf('bottom') >= 0 ? innerHeight - panelH - MARGIN : MARGIN;
+
+    /* Панель: тёмное стекло — читаемо на любой карте и любой теме */
+    rrPath(octx, x, y, panelW, panelH, RAD);
+    octx.fillStyle = 'rgba(18, 20, 28, 0.78)';
+    octx.fill();
+    octx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+    octx.lineWidth = 1;
+    octx.stroke();
+
+    var cx = x + PAD, cy = y + PAD + 10;
+    /* Заголовок */
+    octx.font = FONT_TITLE;
+    octx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    octx.fillText(data.title, cx, cy);
+    cy += 6 + 5;
+
+    /* Градиентная шкала (спутник) */
+    if (data.grad) {
+      var g = octx.createLinearGradient(cx, 0, cx + contentW, 0);
+      data.grad.forEach(function(cstop, i) { g.addColorStop(data.grad.length === 1 ? 0 : i / (data.grad.length - 1), cstop); });
+      rrPath(octx, cx, cy, contentW, 8, 4);
+      octx.fillStyle = g; octx.fill();
+      octx.font = FONT_NOTE;
+      octx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      octx.fillText(data.gradCaps[0], cx, cy + 18);
+      octx.fillText(data.gradCaps[1], cx + contentW - octx.measureText(data.gradCaps[1]).width, cy + 18);
+      cy += gradH + 2;
+    }
+
+    /* Строки (1–2 колонки): цветной квадрат + подпись */
+    octx.font = FONT_ROW;
+    var rowsTop = cy;
+    rows.forEach(function(r, i) {
+      var c = Math.floor(i / perCol), j = i % perCol;
+      var rx = cx + (c === 1 ? colW[0] + GAP * 2 : 0);
+      var ry = rowsTop + j * LINE;
+      octx.fillStyle = r[0];
+      rrPath(octx, rx, ry, SW, SW, 2.5); octx.fill();
+      octx.strokeStyle = 'rgba(0,0,0,0.35)'; octx.lineWidth = 0.5; octx.stroke();
+      octx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+      octx.fillText(r[1], rx + SW + 6, ry + SW - 1);
+    });
+    cy = rowsTop + perCol * LINE;
+
+    /* Примечания (прозрачность, © EUMETSAT, имя палитры) */
+    if (data.notes.length) {
+      octx.font = FONT_NOTE;
+      octx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      data.notes.forEach(function(n, i) { octx.fillText(n, cx, cy + 8 + i * 12); });
+    }
+    octx.restore();
+  }
+
   function renderCompositeToCanvas() {
     var W = Math.round(innerWidth * DPR), H = Math.round(innerHeight * DPR);
     var oc = document.createElement('canvas'); oc.width = W; oc.height = H;
@@ -1336,6 +1475,8 @@
       octx.restore();
       missing = rc.missing; total = rc.total;
     }
+    /* Легенда — последней, поверх базы/подложки/данных (только в композите) */
+    try { drawLegendToCanvas(octx); } catch (e) { console.warn('[export] легенда не отрисована:', e); }
     return { canvas: oc, missing: missing, total: total, w: W, h: H };
   }
 
@@ -1365,6 +1506,8 @@
       sat_channel: S.layer === 'sat' ? SAT_CHANNELS[satChIdx].id : undefined,
       composite: isComposite ? true : undefined,
       basemap_theme: isComposite ? currentTheme : undefined,
+      legend: isComposite ? true : undefined,       /* легенда встроена в пиксели композита */
+      legend_pos: isComposite ? LEGEND_POS : undefined,
       sat_backdrop: isComposite && satBackdropActive() ? 'dark_all под спутником' : undefined,
       zoom: map.getZoom(),
       center: [+c.lat.toFixed(5), +c.lng.toFixed(5)],
