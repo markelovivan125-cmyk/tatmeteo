@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>2х2 | КиберРадар</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,6 +23,11 @@
         <div class="dd-item" data-layer="wx" tabindex="0" role="button">ОЯ Явления</div>
         <div class="dd-item" data-layer="sat" tabindex="0" role="button">Спутник (EUMETSAT)</div>
       </div>
+    </div>
+    <!-- Выбор канала спутника: виден только в sat-режиме, наполняется из script.js -->
+    <div id="channel-wrapper" style="display:none">
+      <button class="btn on" id="btn-channel">Канал</button>
+      <div class="dropdown-menu" id="channel-dropdown"></div>
     </div>
     <div class="sep"></div>
     <button class="btn icon-btn" id="btn-refresh" title="Обновить"><span class="ic">↻</span></button>
@@ -54,7 +59,8 @@
       <h3 id="ltitle">ОТРАЖАЕМОСТЬ dBZ</h3>
       <div style="display:flex;align-items:center;gap:4px"><button id="toggle-legend-btn">−</button></div>
     </div>
-    <div id="lbody"></div>
+    <!-- Обёртка grid 1fr→0fr — плавное сворачивание без анимации height -->
+    <div class="lbody-wrap"><div id="lbody"></div></div>
   </div>
   <button class="restore-btn" id="restore-legend" onclick="restorePanel('legend')">Легенда</button>
 
@@ -110,7 +116,7 @@
   <div id="help-modal">
     <div class="modal-content">
       <h2><span>📘 Справка</span><button class="modal-close" id="help-close">&times;</button></h2>
-      <p>Кибер радар - сайт для визуализации данных и кастомизации отображения их. Изначальные данные только 2х2 км, данные 4х4, 8х8, 1х1 не являются полностью достоверными!<br><br>Разработано при помощи DeepSeek от команды CSF | Convective Storm Forecast</p>
+      <p>Кибер радар - сайт для визуализации данных и кастомизации отображения их. Изначальные данные только 2х2 км, данные 4х4, 8х8, 1х1 не являются полностью достоверными!<br><br>Спутниковые снимки: © EUMETSAT (каналы MSG, задержка ~15 мин).<br><br>Разработано при помощи DeepSeek от команды CSF | Convective Storm Forecast</p>
     </div>
   </div>
 
@@ -125,5 +131,5 @@
     }, 15000);
   </script>
   <script src="script.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f42239a34f12a',t:'MTc4NjM2NzYxMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f6b09ccf5f12a',t:'MTc4NjM2OTI4Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
