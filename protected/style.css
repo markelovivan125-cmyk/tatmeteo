@@ -611,3 +611,13 @@ body.light-theme .create-form { border-color: rgba(0, 0, 0, 0.08); }
 #lbody .li:hover { background: var(--panel-hover); }
 .restore-btn:hover { transform: translateX(0) scale(1.04); }
 #restore-tl:hover { transform: translateX(-50%) scale(1.04); }
+
+/* ═══ Этап 10: грозопеленгатор + мини-кнопки легенды ═══ */
+
+/* Канвас молний: над радаром (350), ПОД overlay-паном Leaflet (400) — линейка
+   и маркеры остаются поверх; клики проходят насквозь */
+#ltg-canvas { position: fixed; inset: 0; z-index: 360; pointer-events: none; }
+
+/* Компактные кнопки-настройки внутри легенды (тумблер подложки и т.п.) */
+#lbody .mini-btn { display: block; width: 100%; text-align: left; margin-top: 8px; padding: 6px 10px; font-size: 10px; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.03); }
+body.light-theme #lbody .mini-btn { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.1); }
