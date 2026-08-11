@@ -575,6 +575,7 @@
     canvas.style.width = innerWidth + 'px';
     canvas.style.height = innerHeight + 'px';
     if (typeof resizeLtgCanvas === 'function') resizeLtgCanvas(); /* канвас молний — тем же размером */
+    if (typeof resizeDopCanvas === 'function') resizeDopCanvas(); /* канвас ветра */
     updThumb(); schedRender();
   }
   addEventListener('resize', resizeCanvas); resizeCanvas();
@@ -638,7 +639,7 @@
   }
 
   /* ─── Crossfade канваса радара при переключении radar↔sat (вместо резкого display) ─── */
-  function canvasShouldHide() { return S.layer === 'sat' || !S.dbzVisible; }
+  function canvasShouldHide() { return (S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible; }
   function fadeCanvas(show) {
     var target = parseInt($('opacity-slider').value) / 100;
     if (REDUCE_MOTION) { canvas.style.display = show ? 'block' : 'none'; canvas.style.opacity = target; return; }
@@ -767,6 +768,8 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     if (S.layer === 'sat') { satUpdateChip(); return; }
+    if (S.layer === 'dmrl') { setChip('📡 ДМРЛ · ' + (window.DMRL_SITES ? DMRL_SITES.length : 0) + ' станций РФ/РБ' + ltgChipSuffix()); return; }
+    if (S.layer === 'dop') { dopUpdateChip(); return; }
     /* Слой скрыт кнопкой-«глазом»: не тратим CPU на отрисовку */
     if (!S.dbzVisible) { setChip((S.layer === 'radar' ? 'dBZ' : 'ОЯ') + ' · слой скрыт'); return; }
     if (S.fade.active) { var elapsed = (performance.now() - S.fade.start) / S.fade.duration; if (elapsed >= 1) { S.fade.active = false; S.fade.alpha = 1; prevFrame.valid = false; } else { S.fade.alpha = Math.min(elapsed, 1); S.fade.alpha = 1 - Math.pow(1 - S.fade.alpha, 3); schedRender(); } }
@@ -872,6 +875,244 @@
   map.on('move', drawLtg); map.on('zoomend', drawLtg);
   if ($('btn-ltg')) $('btn-ltg').addEventListener('click', function() { setLtg(!ltg.on); });
   resizeLtgCanvas();
+
+  /* ═══ БЛОК B: фоновый прогрев спутника ═══
+     Способ: невидимый WMS-слой (opacity:0) на карте. Почему не new Image() вручную:
+     слой использует тот же пул satQueue (≤6), те же события/retry и сам выбирает
+     ВИДИМЫЕ тайлы; кэширование оригиналов уже делает attachSatEvents ('tileload'),
+     а шумные ветки (чип/pulse) отфильтрованы условием lyr === eumetsatLayer.
+     Радар не страдает: его тайлы — обычные Image вне пула спутника.
+     Это сеть, не анимация — reduce-motion прогрев НЕ отключает. */
+  var satPrefetchLayer = null, satPrefetchTmr = null, satPrefetchInterval = null;
+  function satPrefetchCancel() {
+    clearTimeout(satPrefetchTmr); satPrefetchTmr = null;
+    if (satPrefetchLayer) { if (map.hasLayer(satPrefetchLayer)) map.removeLayer(satPrefetchLayer); satPrefetchLayer = null; }
+  }
+  function satPrefetchRun() {
+    if (S.layer === 'sat' || document.visibilityState === 'hidden') return;
+    satPrefetchCancel();
+    /* LIVE-кадр текущего канала, невидимо (opacity 0) */
+    var lyr = createEumetsatLayer(0, SAT_CHANNELS[satChIdx], null);
+    attachSatEvents(lyr); /* кэш оригиналов + реколоризация прогреются тоже */
+    lyr.addTo(map);
+    satPrefetchLayer = lyr;
+    var done = function() { if (satPrefetchLayer === lyr) { if (map.hasLayer(lyr)) map.removeLayer(lyr); satPrefetchLayer = null; } };
+    lyr.once('load', function() { setTimeout(done, 500); }); /* тайлы в кэше — слой больше не нужен */
+    setTimeout(done, 25000); /* страховка при ошибках сети */
+  }
+  function satPrefetchSchedule(delay) {
+    if (S.layer === 'sat') return;
+    clearTimeout(satPrefetchTmr);
+    satPrefetchTmr = setTimeout(satPrefetchRun, delay);
+  }
+  /* Старт через ~2.5с после загрузки (не мешаем радару), после перемещений — idle 5с,
+     каждые 5 мин — освежаем LIVE-кадр в кэше */
+  setTimeout(function() { satPrefetchSchedule(2500); }, 0);
+  map.on('moveend', function() { if (S.layer !== 'sat') satPrefetchSchedule(5000); });
+  satPrefetchInterval = setInterval(function() { if (document.visibilityState !== 'hidden') satPrefetchSchedule(0); }, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') satPrefetchCancel();
+    else satPrefetchSchedule(3000);
+  });
+
+  /* ═══ БЛОК C: слой ДМРЛ (станции России и Беларуси, protected/dmrl.js) ═══ */
+  var dmrlGroup = null;
+  function dmrlBuild() {
+    if (dmrlGroup || !window.DMRL_SITES) return;
+    dmrlGroup = L.layerGroup();
+    DMRL_SITES.forEach(function(st) {
+      var mk = L.marker([st.lat, st.lon], {
+        icon: L.divIcon({ className: '', html: '<div class="dmrl-dot"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }),
+        keyboard: false
+      });
+      mk.bindTooltip(st.name, { direction: 'top', offset: [0, -8], className: 'dmrl-tip' });
+      mk.on('click', function(e) {
+        /* Попап в фирменном #pixel-popup */
+        var pt = map.latLngToContainerPoint([st.lat, st.lon]);
+        popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:#5b8def"></div><div class="popup-label">📡 ' + escHtml(st.name) + '</div></div>' +
+          '<div class="popup-meta">ДМРЛ-С · ' + escHtml(st.region) + '<br>' + st.lat.toFixed(2) + '°, ' + st.lon.toFixed(2) + '°<br><span style="opacity:.7">координаты ориентировочные</span></div>' +
+          '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+        popupEl.style.display = 'block';
+        popupEl.classList.remove('popup-in'); void popupEl.offsetWidth; popupEl.classList.add('popup-in');
+        var px2 = pt.x + 14, py2 = pt.y - 40;
+        if (px2 + 230 > innerWidth - 8) px2 = pt.x - 246;
+        if (py2 < 8) py2 = 8;
+        popupEl.style.left = px2 + 'px'; popupEl.style.top = py2 + 'px';
+      });
+      dmrlGroup.addLayer(mk);
+    });
+  }
+  /* Подписи станций — только с зума 7 (иначе каша); переключаем permanent-тултипы */
+  function dmrlUpdateLabels() {
+    if (!dmrlGroup || !map.hasLayer(dmrlGroup)) return;
+    var perm = map.getZoom() >= 7;
+    dmrlGroup.eachLayer(function(mk) {
+      var tip = mk.getTooltip();
+      if (!tip || tip.options.permanent === perm) return;
+      var txt = tip.getContent();
+      mk.unbindTooltip();
+      mk.bindTooltip(txt, { direction: 'top', offset: [0, -8], className: 'dmrl-tip', permanent: perm });
+    });
+  }
+  function dmrlShow() { dmrlBuild(); if (dmrlGroup && !map.hasLayer(dmrlGroup)) dmrlGroup.addTo(map); dmrlUpdateLabels(); }
+  function dmrlHide() { if (dmrlGroup && map.hasLayer(dmrlGroup)) map.removeLayer(dmrlGroup); }
+  map.on('zoomend', dmrlUpdateLabels);
+  /* Маркеры в пиксели композита (экспорт) */
+  function drawDmrlToCtx(c2) {
+    if (!window.DMRL_SITES) return;
+    DMRL_SITES.forEach(function(st) {
+      var pt = map.latLngToContainerPoint([st.lat, st.lon]);
+      if (pt.x < -10 || pt.x > innerWidth + 10 || pt.y < -10 || pt.y > innerHeight + 10) return;
+      c2.beginPath(); c2.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+      c2.fillStyle = '#5b8def'; c2.fill();
+      c2.lineWidth = 2; c2.strokeStyle = 'rgba(0,0,0,0.6)'; c2.stroke();
+    });
+  }
+
+  /* ═══ БЛОК D: «Доплер» — модельная скорость ветра (Open-Meteo, 10 м) ═══
+     ЧЕСТНО: это НЕ радиальная скорость ДМРЛ — открытых доплеровских продуктов
+     по РФ нет (meteorad закрыт). При появлении доступа реальный доплер добавляется
+     сюда: слой-источник вместо fetchWindGrid. Open-Meteo: CORS *, без ключа. */
+  var dop = { on: false, cache: new Map(), points: [], lastAt: 0, err: null, timer: null, gen: 0, ctrl: null, fetching: false };
+  var dopCanvas = $('dop-canvas'), dopCtx = dopCanvas ? dopCanvas.getContext('2d') : null;
+  function resizeDopCanvas() {
+    if (!dopCanvas) return;
+    dopCanvas.width = Math.round(innerWidth * DPR); dopCanvas.height = Math.round(innerHeight * DPR);
+    dopCanvas.style.width = innerWidth + 'px'; dopCanvas.style.height = innerHeight + 'px';
+    drawDop();
+  }
+  /* Шкала скорости (км/ч) — по метео-градациям (слабый/умеренный/сильный/шторм) */
+  var DOP_STOPS = [
+    { v: 50, c: '#9c27b0', l: '> 50 — шторм' },
+    { v: 30, c: '#f4511e', l: '30–50 — сильный' },
+    { v: 15, c: '#e6c84f', l: '15–30 — умеренный' },
+    { v: 5,  c: '#56b06a', l: '5–15 — слабый' },
+    { v: 0,  c: 'rgba(150,150,155,0.8)', l: '0–5 — штиль' }
+  ];
+  function dopColor(sp) { for (var i = 0; i < DOP_STOPS.length; i++) if (sp >= DOP_STOPS[i].v) return DOP_STOPS[i].c; return DOP_STOPS[DOP_STOPS.length - 1].c; }
+  /* Сетка точек по видимой области: шаг зависит от зума, потолок ~140 точек */
+  function dopGrid() {
+    var z = map.getZoom(), b = map.getBounds();
+    var step = z >= 8 ? 0.5 : (z >= 7 ? 0.75 : (z >= 6 ? 1 : (z >= 5 ? 2 : 3)));
+    var pts = [];
+    var lat0 = Math.floor(b.getSouth() / step) * step, lat1 = Math.ceil(b.getNorth() / step) * step;
+    var lon0 = Math.floor(b.getWest() / step) * step, lon1 = Math.ceil(b.getEast() / step) * step;
+    for (var la = lat0; la <= lat1; la += step) {
+      for (var lo = lon0; lo <= lon1; lo += step) {
+        pts.push([+la.toFixed(2), +lo.toFixed(2)]);
+        if (pts.length >= 140) return pts;
+      }
+    }
+    return pts;
+  }
+  function fetchWindGrid(force) {
+    if (!dop.on) return;
+    var gen = ++dop.gen;
+    if (dop.ctrl) dop.ctrl.abort(); /* отменяем прошлую волну при новом moveend */
+    var pts = dopGrid();
+    dop.points = pts;
+    var now = Date.now();
+    var need = pts.filter(function(p) {
+      var c = dop.cache.get(p[0] + ',' + p[1]);
+      return force || !c || (now - c.t) > 15 * 60 * 1000; /* TTL 15 мин */
+    });
+    if (!need.length) { drawDop(); schedRender(); return; }
+    dop.fetching = true; bumpLoad(1);
+    dop.ctrl = new AbortController();
+    /* Open-Meteo принимает списки координат — одна волна = 1-3 запроса по 50 точек */
+    var batches = [];
+    for (var i = 0; i < need.length; i += 50) batches.push(need.slice(i, i + 50));
+    Promise.all(batches.map(function(batch) {
+      var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + batch.map(function(p) { return p[0]; }).join(',') +
+        '&longitude=' + batch.map(function(p) { return p[1]; }).join(',') +
+        '&current=wind_speed_10m,wind_direction_10m';
+      return fetch(url, { signal: dop.ctrl.signal }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function(j) {
+        var arr = Array.isArray(j) ? j : [j]; /* одна точка приходит объектом */
+        arr.forEach(function(rec, k) {
+          if (!rec || !rec.current) return;
+          dop.cache.set(batch[k][0] + ',' + batch[k][1], { sp: +rec.current.wind_speed_10m || 0, dir: +rec.current.wind_direction_10m || 0, t: now });
+        });
+      });
+    })).then(function() {
+      if (gen !== dop.gen) return; /* устаревшая волна */
+      dop.err = null; dop.lastAt = Date.now();
+    }).catch(function(e) {
+      if (e.name === 'AbortError') return;
+      dop.err = String(e.message || e);
+      console.warn('[dop] Open-Meteo:', dop.err);
+      toast('🌀 Ветер недоступен: ' + dop.err);
+    }).then(function() {
+      dop.fetching = false; bumpLoad(-1);
+      drawDop(); schedRender();
+    });
+  }
+  /* Стрелка: фиксированная длина + цвет по скорости (длина-по-скорости при плотной
+     сетке превращается в кашу; цвет считывается мгновенно). Метео-направление —
+     ОТКУДА дует; рисуем «куда» (dir+180°) — указано в легенде. */
+  function drawDopToCtx(c2) {
+    var L2 = 14;
+    for (var i = 0; i < dop.points.length; i++) {
+      var p = dop.points[i], rec = dop.cache.get(p[0] + ',' + p[1]);
+      if (!rec) continue;
+      var pt = map.latLngToContainerPoint([p[0], p[1]]);
+      if (pt.x < -20 || pt.x > innerWidth + 20 || pt.y < -20 || pt.y > innerHeight + 20) continue;
+      var ang = (rec.dir + 180) * Math.PI / 180; /* куда дует; 0° = север, по часовой */
+      c2.save();
+      c2.translate(pt.x, pt.y);
+      c2.rotate(ang);
+      /* тёмная подложка-обводка + цветная стрелка */
+      for (var pass = 0; pass < 2; pass++) {
+        c2.strokeStyle = pass === 0 ? 'rgba(0,0,0,0.55)' : dopColor(rec.sp);
+        c2.lineWidth = pass === 0 ? 4 : 2;
+        c2.lineCap = 'round';
+        c2.beginPath();
+        c2.moveTo(0, L2 / 2); c2.lineTo(0, -L2 / 2);            /* древко (вверх = куда) */
+        c2.moveTo(-3.5, -L2 / 2 + 5); c2.lineTo(0, -L2 / 2);    /* наконечник */
+        c2.lineTo(3.5, -L2 / 2 + 5);
+        c2.stroke();
+      }
+      c2.restore();
+    }
+  }
+  var dopDrawPend = false;
+  function drawDop() {
+    if (!dopCtx || dopDrawPend) return;
+    dopDrawPend = true;
+    requestAnimationFrame(function() {
+      dopDrawPend = false;
+      dopCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      dopCtx.clearRect(0, 0, innerWidth, innerHeight);
+      if (dop.on) drawDopToCtx(dopCtx);
+    });
+  }
+  function dopUpdateChip() {
+    var n = 0;
+    for (var i = 0; i < dop.points.length; i++) if (dop.cache.has(dop.points[i][0] + ',' + dop.points[i][1])) n++;
+    var t = dop.lastAt ? new Date(dop.lastAt).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }) : '—';
+    setChip('🌀 ветер (модель Open-Meteo, 10 м) · ' + n + ' точек · обн. ' + t + (dop.fetching ? ' · ⏳' : '') + (dop.err ? ' · ⚠️' : '') + ltgChipSuffix());
+  }
+  var dopMoveTmr = null;
+  function dopOnMoveEnd() { if (!dop.on) return; clearTimeout(dopMoveTmr); dopMoveTmr = setTimeout(function() { fetchWindGrid(false); }, 500); }
+  function dopStart() {
+    if (dop.on) return;
+    dop.on = true;
+    fetchWindGrid(false);
+    dop.timer = setInterval(function() { if (document.visibilityState !== 'hidden' && dop.on) fetchWindGrid(true); }, 15 * 60 * 1000);
+  }
+  function dopStop() {
+    if (!dop.on) return;
+    dop.on = false;
+    clearInterval(dop.timer); dop.timer = null;
+    if (dop.ctrl) dop.ctrl.abort();
+    dop.points = [];
+    drawDop();
+  }
+  map.on('moveend zoomend', dopOnMoveEnd);
+  map.on('move', drawDop);
+  resizeDopCanvas();
   function forceRefresh() {
     if (S.layer === 'sat') { satRecolorCache.clear(); satApplyTime(true); return; } /* смена палитры спутника → перекрасить тайлы */
     S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender();
@@ -955,12 +1196,40 @@
     if (!newLayer || newLayer === S.layer) return;
     S.layer = newLayer;
     document.querySelectorAll('#layers-dropdown .dd-item').forEach(function(item) { item.classList.toggle('active', item.dataset.layer === S.layer); });
-    $('btn-layers-menu').textContent = 'Слои: ' + (S.layer === 'radar' ? 'dBZ' : (S.layer === 'wx' ? 'ОЯ' : 'Спутник'));
+    var LAYER_LABELS = { radar: 'dBZ', wx: 'ОЯ', sat: 'Спутник', dmrl: 'ДМРЛ', dop: 'Доплер' };
+    $('btn-layers-menu').textContent = 'Слои: ' + (LAYER_LABELS[S.layer] || S.layer);
 
     stopPlay();
     /* Смена слоя всегда возвращает видимость dBZ — предсказуемо для пользователя */
     S.dbzVisible = true;
+    /* Уборка спец-слоёв (ДМРЛ/доплер) — идемпотентно при любом переходе */
+    dmrlHide(); dopStop();
+    /* Таймлайн возвращаем, если пользователь не скрывал его сам (спец-слои его прячут) */
+    if (S.layer !== 'dmrl' && S.layer !== 'dop' && !hiddenPanels['tl']) $('tl').style.display = 'flex';
+    if (S.layer === 'dmrl' || S.layer === 'dop') {
+      /* ─── Спец-слои: чистая базовая карта + оверлей (маркеры ДМРЛ / сетка ветра).
+         Радар-канвас и спутник выключаем: это самостоятельные режимы без временных
+         кадров — таймлайн скрываем (истории нет), ↻ лишь перерисовывает/обновляет. ─── */
+      if (eumetsatLayer) { map.removeLayer(eumetsatLayer); eumetsatLayer = null; }
+      if (satOldLayer) { if (map.hasLayer(satOldLayer)) map.removeLayer(satOldLayer); satOldLayer = null; }
+      satLoading = false; $('pulse').classList.remove('busy');
+      updateSatBackdrop(false);
+      $('channel-wrapper').style.display = 'none';
+      $('opacity-slider').value = radarOpacityMem;
+      $('opacity-val').textContent = radarOpacityMem + '%';
+      fadeCanvas(false); /* canvasShouldHide() знает про спец-слои */
+      $('tl').style.display = 'none'; $('restore-tl').style.display = 'none';
+      if (S.layer === 'dmrl') { dmrlShow(); toast('📡 ДМРЛ: станции России и Беларуси'); }
+      else { dopStart(); toast('🌀 Доплер: модельный ветер Open-Meteo (10 м)'); }
+      schedRender(); /* чип обновится в doRender */
+      applyDbzUI();
+      buildLegend(); hidePopup();
+      if (S.ruler.active) toggleRuler();
+      saveViewDebounced();
+      return;
+    }
     if (S.layer === 'sat') {
+      satPrefetchCancel(); /* прогрев больше не нужен — кэш уже тёплый, показываем сразу */
       /* Спутник: канвас радара плавно гаснет, таймлайн ОСТАЁТСЯ (история WMS через time=) */
       fadeCanvas(false);
       /* Прозрачность спутника фиксирована 50%: запоминаем значение радара,
@@ -1131,6 +1400,35 @@
       appendLtgLegend(el);
       return;
     }
+    if (S.layer === 'dmrl') {
+      setLegendTitle('ДМРЛ · РАДАРЫ РФ/РБ');
+      var r1 = document.createElement('div'); r1.className = 'li';
+      var q1 = document.createElement('div'); q1.className = 'lsq'; q1.style.background = '#5b8def'; q1.style.borderRadius = '50%';
+      var t1 = document.createElement('span'); t1.textContent = 'ДМРЛ — доплеровский метеорадар';
+      r1.appendChild(q1); r1.appendChild(t1); el.appendChild(r1);
+      var n1 = document.createElement('div'); n1.className = 'li legend-note'; n1.textContent = 'Клик по маркеру — данные станции; подписи с зума 7'; el.appendChild(n1);
+      var n2 = document.createElement('div'); n2.className = 'li legend-note'; n2.textContent = 'Координаты ориентировочные (открытые источники)'; el.appendChild(n2);
+      appendLtgLegend(el);
+      return;
+    }
+    if (S.layer === 'dop') {
+      setLegendTitle('ДОПЛЕР · ВЕТЕР 10 М');
+      var g = document.createElement('div'); g.className = 'lgrad li';
+      g.style.background = 'linear-gradient(to right, ' + DOP_STOPS.slice().reverse().map(function(st) { return st.c; }).join(', ') + ')';
+      el.appendChild(g);
+      var cap = document.createElement('div'); cap.className = 'li lgrad-cap';
+      cap.innerHTML = '<span>0 км/ч</span><span>50+</span>'; el.appendChild(cap);
+      DOP_STOPS.forEach(function(st) {
+        var row = document.createElement('div'); row.className = 'li';
+        var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = st.c;
+        var tt = document.createElement('span'); tt.textContent = st.l + ' км/ч';
+        row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
+      });
+      var d1 = document.createElement('div'); d1.className = 'li legend-note'; d1.textContent = 'Стрелка — КУДА дует ветер'; el.appendChild(d1);
+      var d2 = document.createElement('div'); d2.className = 'li legend-note'; d2.textContent = 'Модель Open-Meteo (10 м), НЕ радиолокационный доплер'; el.appendChild(d2);
+      appendLtgLegend(el);
+      return;
+    }
     var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; setLegendTitle(title); 
     items.forEach(function(p, i) { var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14)); var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
     appendLtgLegend(el);
@@ -1161,6 +1459,7 @@
 
   /* Авто-подтяжка данных: радар — каждую минуту; спутник — при появлении нового 15-мин кадра */
   setInterval(function() {
+    if (S.layer === 'dmrl' || S.layer === 'dop') return; /* нет временных кадров */
     if (S.playing || S.manualTime) { if (S.layer !== 'sat') buildFrames(); return; }
     var n = nowTs();
     if (n !== S.ts) {
@@ -1177,7 +1476,7 @@
   function findPalEntry(r, g, b) { var items = getCurrentPaletteItems(), best = null, bd = 1e9; for (var i = 0; i < items.length; i++) { var p = items[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2], d = dr * dr + dg * dg + db * db; if (d < bd) { bd = d; best = p; } } return bd < 3000 ? { label: best.l, v: best.v } : null; }
   
   function getBlockAt(mx, my) { 
-    if (S.layer === 'sat' || !S.dbzVisible) return null; /* скрытый dBZ — как sat: без прицела/попапа */
+    if ((S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible) return null; /* данные пикселей есть только у радара/ОЯ */
     var tiles = visTiles(); 
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], r = tileRect(t.x, t.y); 
@@ -1486,6 +1785,16 @@
       out.notes.push('© EUMETSAT');
       return out;
     }
+    if (S.layer === 'dmrl') {
+      return { title: 'ДМРЛ · РАДАРЫ РФ/РБ', grad: null, gradCaps: null,
+        rows: [['#5b8def', 'ДМРЛ — доплеровский метеорадар']],
+        notes: ['Координаты ориентировочные'] };
+    }
+    if (S.layer === 'dop') {
+      return { title: 'ДОПЛЕР · ВЕТЕР 10 М', grad: DOP_STOPS.slice().reverse().map(function(st) { return st.c; }), gradCaps: ['0 км/ч', '50+'],
+        rows: DOP_STOPS.map(function(st) { return [st.c, st.l + ' км/ч']; }),
+        notes: ['Стрелка — куда дует', 'Модель Open-Meteo, не радиодоплер'] };
+    }
     var items = getCurrentPaletteItems();
     var o = { title: S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ', grad: null, gradCaps: null, rows: [], notes: [] };
     items.forEach(function(p) { o.rows.push(['rgb(' + p.r.join(',') + ')', p.l]); });
@@ -1606,7 +1915,11 @@
     var missing = 0, total = 0;
     if (S.layer === 'sat') {
       var sat = renderSatToCanvas();
-      if (sat) { octx.save(); octx.setTransform(1, 0, 0, 1, 0, 0); octx.globalAlpha = SAT_OPACITY; octx.drawImage(sat.canvas, 0, 0); octx.restore(); total = sat.total; }
+      if (sat) { octx.save(); octx.setTransform(1, 0, 0, 1, 0, 0); octx.globalAlpha = satOpacityMem / 100; octx.drawImage(sat.canvas, 0, 0); octx.restore(); total = sat.total; }
+    } else if (S.layer === 'dmrl') {
+      drawDmrlToCtx(octx); /* маркеры станций — в пиксели */
+    } else if (S.layer === 'dop') {
+      drawDopToCtx(octx);  /* стрелки ветра — в пиксели */
     } else {
       var rc = renderRadarToCanvas();
       octx.save(); octx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1650,6 +1963,9 @@
       basemap_theme: isComposite ? currentTheme : undefined,
       legend: isComposite ? true : undefined,       /* легенда встроена в пиксели композита */
       lightning: ltg.on ? true : undefined,         /* молнии вписаны в пиксели */
+      dmrl: S.layer === 'dmrl' ? true : undefined,
+      doppler: S.layer === 'dop' ? true : undefined,
+      doppler_source: S.layer === 'dop' ? 'Open-Meteo wind_speed_10m (модель, не радиодоплер)' : undefined,
       legend_pos: isComposite ? LEGEND_POS : undefined,
       sat_backdrop: isComposite && satBackdropActive() ? 'dark_all под спутником' : undefined,
       zoom: map.getZoom(),
@@ -1718,6 +2034,7 @@
   }
 
   function doExport(fmt) {
+    if ((S.layer === 'dmrl' || S.layer === 'dop') && fmt !== 'map' && fmt !== 'mapgeo') { toast('Для этого слоя доступен экспорт «Карта + слой»'); return; }
     if (fmt === 'csv' && S.layer === 'sat') { toast('CSV доступен только для радара/явлений'); return; }
     if (S.layer !== 'sat' && !S.dbzVisible) { toast('Слой скрыт — включите 👁 для экспорта'); return; }
     var btn = $('btn-download');
@@ -1749,7 +2066,7 @@
           } finally { finish(); }
         }, 30);
       };
-      if (S.layer === 'sat') { run(); } else { waitForTiles(function() { run(); }); }
+      if (S.layer === 'radar' || S.layer === 'wx') { waitForTiles(function() { run(); }); } else { run(); } /* спец-слоям радар-тайлы не нужны */
       return;
     }
 
@@ -1902,7 +2219,7 @@
           document.querySelectorAll('#channel-dropdown .dd-item').forEach(function(it, j) { it.classList.toggle('active', j === fi); });
         }
       }
-      if (v.layer === 'sat' || v.layer === 'wx') setLayer(v.layer); /* sat пересоздаст WMS с каналом */
+      if (v.layer === 'sat' || v.layer === 'wx' || v.layer === 'dmrl' || v.layer === 'dop') setLayer(v.layer); /* sat пересоздаст WMS с каналом */
       if (v.ltgVisible) setLtg(true, true); /* тихо, без тостов при старте */
       if (v.dbzVisible === false && S.layer !== 'sat') {
         S.dbzVisible = false; canvas.style.display = 'none'; applyDbzUI();
