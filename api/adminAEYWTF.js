@@ -6,7 +6,8 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-/* ─── Мастер-пароль админки: ТОЛЬКО из переменной окружения (никогда не хардкодить!).
+/* ─── Мастер-пароль админки («admin_master_key»): ТОЛЬКО из env (никогда не хардкодить!).
+   ПОЛНАЯ ИНСТРУКЦИЯ (генерация ключа, Vercel, локально): README.md → «admin_master_key».
    Как задать:
    • Vercel: Dashboard → Project → Settings → Environment Variables →
      ADMIN_MASTER_PASS → значение → Production/Preview/Development → Redeploy.
