@@ -1,11 +1,26 @@
 import { Redis } from '@upstash/redis';
+import crypto from 'crypto';
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-const ADMIN_MASTER_PASS = 'УКРФTUNG1245TOR'; 
+/* ─── Мастер-пароль админки: ТОЛЬКО из переменной окружения (никогда не хардкодить!).
+   Как задать:
+   • Vercel: Dashboard → Project → Settings → Environment Variables →
+     ADMIN_MASTER_PASS → значение → Production/Preview/Development → Redeploy.
+   • Локально: cp .env.example .env, вписать значение; `vercel dev` подхватит сам.
+   ВАЖНО: старый пароль засветился в истории коммитов публичного репозитория —
+   после деплоя задайте НОВОЕ значение (историю git не очистить задним числом). ─── */
+const ADMIN_MASTER_PASS = process.env.ADMIN_MASTER_PASS || '';
+
+/* Сравнение, устойчивое к timing-атакам: длины выравниваем хэшированием */
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
 export default async function handler(req, res) {
   const action = req.query.action;
@@ -21,7 +36,11 @@ export default async function handler(req, res) {
     });
     const body = await getBody();
 
-    if (body.masterPassword === ADMIN_MASTER_PASS) {
+    if (!ADMIN_MASTER_PASS) {
+      /* Не даём доступ и не логируем значения */
+      return res.status(500).json({ error: 'ADMIN_MASTER_PASS не задан на сервере' });
+    }
+    if (typeof body.masterPassword === 'string' && safeEqual(body.masterPassword, ADMIN_MASTER_PASS)) {
       const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
       await redis.set(`admin_sess:${token}`, '1', { ex: 86400 }); 
       res.setHeader('Set-Cookie', `admin_sess=${token}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`);
