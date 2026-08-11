@@ -638,3 +638,6 @@ body.light-theme .dmrl-dot { border-color: rgba(255, 255, 255, 0.9); }
 .dmrl-tip { background: var(--glass-bg-solid) !important; border: 1px solid var(--glass-border) !important; border-radius: 8px !important; color: var(--text) !important; font-family: 'Manrope', sans-serif !important; font-size: 10px !important; font-weight: 600 !important; padding: 3px 8px !important; box-shadow: var(--shadow-sm) !important; }
 .dmrl-tip::before { display: none !important; }
 body.light-theme .dmrl-tip { background: rgba(255, 255, 255, 0.92) !important; color: #1a1a1a !important; border-color: rgba(0, 0, 0, 0.08) !important; }
+
+/* ═══ Этап 12: доплер nowcast + ДМРЛ-оверлей ═══ */
+#dopheight-wrapper { position: relative; } /* якорь дропдауна высоты */
