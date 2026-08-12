@@ -56,6 +56,47 @@
   ];
   var radarNcIdx = 0;
   try { var rnl = localStorage.getItem('radarNcLayer'); var rni = RADAR_NC_LAYERS.findIndex(function(l) { return l.id === rnl; }); if (rni >= 0) radarNcIdx = rni; } catch (e) {}
+  /* ─── ОЯ BUFR: ВСЕ станции явлений nowcast, показываются одновременно (география
+     станций не пересекается → комбинированный слой корректен).
+     gimet_phenomena ИСКЛЮЧЁН: в GetCapabilities у него нет Extent/BBox (mapserver
+     пишет WARNING «could not be established»), тайлы пустые по всей РФ — мёртвый слой. */
+  var WX_NC_LAYERS = [
+    { id: 'bufr_phenomena', label: 'Москва' },
+    { id: 'bufr_novosib_phenomena', label: 'Новосибирск' },
+    { id: 'bufr_vlad_phenomena', label: 'Владивосток' }
+  ];
+  /* Фактическая палитра источника: [код BUFR, цвет, название явления].
+     Цвета сняты с GetLegendGraphic bufr_phenomena и сверены попиксельно через
+     GetFeatureInfo (var value=N в ответе). Названия — из скрипта конвертации nowcast;
+     у кодов 10–12 в источнике метки «гроза (R…)» — R это вероятность грозы. */
+  var WX_NC_PALETTE = [
+    [0,  'rgb(202,202,202)', 'нет эха (зона обзора)'],
+    [1,  'rgb(155,168,175)', 'облачность среднего яруса'],
+    [2,  'rgb(160,196,253)', 'слоистообразная облачность'],
+    [3,  'rgb(68,253,145)',  'осадки слабые'],
+    [4,  'rgb(0,192,88)',    'осадки умеренные'],
+    [5,  'rgb(0,151,0)',     'осадки сильные'],
+    [6,  'rgb(253,253,126)', 'кучевая облачность'],
+    [7,  'rgb(61,135,253)',  'ливень слабый'],
+    [8,  'rgb(0,55,253)',    'ливень умеренный'],
+    [9,  'rgb(0,0,115)',     'ливень сильный'],
+    [10, 'rgb(253,168,125)', 'гроза (вероятн. 30–70%)'],
+    [11, 'rgb(253,84,125)',  'гроза (вероятн. 70–90%)'],
+    [12, 'rgb(253,0,0)',     'гроза (вероятн. >90%)'],
+    [13, 'rgb(202,101,0)',   'град слабый'],
+    [14, 'rgb(135,66,0)',    'град умеренный'],
+    [15, 'rgb(94,0,0)',      'град сильный'],
+    [16, 'rgb(253,168,253)', 'шквал слабый'],
+    [17, 'rgb(253,84,253)',  'шквал умеренный'],
+    [18, 'rgb(198,0,198)',   'шквал сильный'],
+    [19, 'rgb(62,62,94)',    'смерч']
+  ];
+  /* Код явления → название (для попапа GetFeatureInfo) */
+  var WX_NC_CODES = {};
+  WX_NC_PALETTE.forEach(function(p) { WX_NC_CODES[p[0]] = p[2]; });
+  WX_NC_CODES[255] = 'нет информации';
+  /* Числовые RGB палитры ОЯ — для указателя/прицела (сопоставление цвета пикселя тайла) */
+  var WX_NC_RGB = WX_NC_PALETTE.map(function(p) { var m = p[1].match(/\d+/g); return [+m[0], +m[1], +m[2]]; });
   var HISTORY_MINUTES = 190, MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
   var BASE_RES_KM = 2;
 
@@ -687,6 +728,7 @@
     S.dbzVisible = !S.dbzVisible;
     fadeCanvas(S.dbzVisible); /* плавное затухание/проявление 250–300мс, reduced-motion — мгновенно */
     if (radarNcLayer) radarNcLayer.setOpacity(S.dbzVisible ? (parseInt($('opacity-slider').value) || 100) / 100 : 0); /* WMS-режим */
+    wxNcExtras.forEach(function(l) { l.setOpacity(S.dbzVisible ? (parseInt($('opacity-slider').value) || 100) / 100 : 0); }); /* доп. станции ОЯ */
     applyDbzUI();
     if (S.dbzVisible) schedRender(); else { hidePopup(); hoverEl.style.display = 'none'; }
     saveViewDebounced();
@@ -789,7 +831,7 @@
     if (radarNcActive()) { /* dBZ с nowcast: рисует WMS-слой, канвас пуст */
       var liveNc = S.ts >= nowTs();
       var tNc = new Date((liveNc ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-      setChip((S.layer === 'wx' ? 'ОЯ · nowcast (ДМРЛ явления)' : 'dBZ · nowcast (' + RADAR_NC_LAYERS[radarNcIdx].label + ')') + ' · ' + tNc + ' МСК' + (liveNc ? ' (LIVE)' : '') + (radarNcLoading ? ' · ⏳' : '') + (radarNcErr ? ' · ⚠️ ' + radarNcErr : '') + (!S.dbzVisible ? ' · слой скрыт' : '') + dmrlChipSuffix() + ltgChipSuffix());
+      setChip((S.layer === 'wx' ? 'ОЯ · nowcast (BUFR: Мск·Нвс·Влд)' : 'dBZ · nowcast (' + RADAR_NC_LAYERS[radarNcIdx].label + ')') + ' · ' + tNc + ' МСК' + (liveNc ? ' (LIVE)' : '') + (radarNcLoading ? ' · ⏳' : '') + (radarNcErr ? ' · ⚠️ ' + radarNcErr : '') + (!S.dbzVisible ? ' · слой скрыт' : '') + dmrlChipSuffix() + ltgChipSuffix());
       return;
     }
     if (S.layer === 'dop') { dopUpdateChip(); return; }
@@ -1165,8 +1207,8 @@
   function radarNcActive() { return (S.layer === 'radar' || S.layer === 'wx') && radarSource === 'nowcast'; }
   function createRadarNcLayer(ts) {
     var params = {
-      /* ОЯ Явления — bufr_phenomena; отражаемость — выбранные данные (ДМРЛ/FMI) */
-      layers: S.layer === 'wx' ? 'bufr_phenomena' : RADAR_NC_LAYERS[radarNcIdx].id,
+      /* ОЯ Явления — первая станция BUFR (остальные — wxNcExtras); отражаемость — выбранные данные (ДМРЛ/FMI) */
+      layers: S.layer === 'wx' ? WX_NC_LAYERS[0].id : RADAR_NC_LAYERS[radarNcIdx].id,
       format: 'image/png',
       transparent: true,
       version: '1.1.1',
@@ -1236,17 +1278,56 @@
     lyr.on('tileload', function(e) { if (lyr === radarNcLayer && !e.tile._recolored) recolorRadarNcTile(e.tile); });
     lyr.on('tileerror', function() {
       if (lyr !== radarNcLayer) return;
-      radarNcFails++;
-      if (radarNcFails >= 6 && radarSource === 'nowcast') {
-        /* БЛОК B: авто-fallback на rainradar. Авто-возврата НЕТ — периодические
-           пробные запросы дёргали бы полуживой сервер и мигали слоем;
-           возврат — вручную кнопкой «Источник» в легенде. */
-        toast('⚠️ ДМРЛ/nowcast недоступен — переключаюсь на rainradar');
-        setRadarSource('rainradar', true);
-      } else if (radarNcFails >= 3) {
-        radarNcErr = 'ошибки тайлов'; radarNcLoading = false; $('pulse').classList.remove('busy'); schedRender();
-      }
+      radarNcCountFail();
     });
+  }
+  /* Общий счётчик ошибок nowcast (главный слой + доп. станции ОЯ) → общий fallback */
+  function radarNcCountFail() {
+    radarNcFails++;
+    if (radarNcFails >= 6 && radarSource === 'nowcast') {
+      /* БЛОК B: авто-fallback на rainradar. Авто-возврата НЕТ — периодические
+         пробные запросы дёргали бы полуживой сервер и мигали слоем;
+         возврат — вручную кнопкой «Источник» в легенде. */
+      toast('⚠️ ДМРЛ/nowcast недоступен — переключаюсь на rainradar');
+      setRadarSource('rainradar', true);
+    } else if (radarNcFails >= 3) {
+      radarNcErr = 'ошибки тайлов'; radarNcLoading = false; $('pulse').classList.remove('busy'); schedRender();
+    }
+  }
+  /* ─── БЛОК A: доп. станции ОЯ BUFR (все, кроме первой — её ведёт radarNcLayer).
+     Каждая станция — отдельный прозрачный WMS-слой с тем же zIndex: географии
+     не пересекаются, наложение корректно. Свап по паттерну проекта: новые поверх,
+     старые убираем после загрузки (страховка 5с). ─── */
+  var wxNcExtras = [], wxNcExtrasOld = [];
+  function wxNcClearExtras() {
+    wxNcExtras.concat(wxNcExtrasOld).forEach(function(l) { if (map.hasLayer(l)) map.removeLayer(l); });
+    wxNcExtras = []; wxNcExtrasOld = [];
+  }
+  function wxNcSyncExtras(ts) {
+    /* вызывается из radarNcApply: не-ОЯ режим → просто убрать доп. станции */
+    if (S.layer !== 'wx' || radarSource !== 'nowcast') { wxNcClearExtras(); return; }
+    wxNcExtrasOld = wxNcExtrasOld.concat(wxNcExtras);
+    wxNcExtras = [];
+    for (var i = 1; i < WX_NC_LAYERS.length; i++) {
+      var params = {
+        layers: WX_NC_LAYERS[i].id,
+        format: 'image/png', transparent: true, version: '1.1.1',
+        crs: L.CRS.EPSG4326, tileSize: 256, zIndex: 11, maxZoom: 10,
+        updateWhenIdle: false, keepBuffer: 2,
+        opacity: S.dbzVisible ? (parseInt($('opacity-slider').value) || 100) / 100 : 0
+      };
+      if (ts) params.time = satIso(ts); /* LIVE — без TIME, общий кадр с главным слоем */
+      var lyr = new SatWMS('/api/nowcastProxy', params);
+      lyr.on('tileerror', radarNcCountFail); /* общий счётчик → общий fallback на rainradar */
+      lyr.addTo(map);
+      wxNcExtras.push(lyr);
+    }
+    var rmOld = function() {
+      wxNcExtrasOld.forEach(function(l) { if (map.hasLayer(l)) map.removeLayer(l); });
+      wxNcExtrasOld = [];
+    };
+    if (wxNcExtras.length) wxNcExtras[0].once('load', rmOld);
+    setTimeout(rmOld, 5000);
   }
   /* Смена кадра/данных: новый слой поверх, старый после загрузки (единый паттерн проекта) */
   function radarNcApply(immediate) {
@@ -1261,6 +1342,7 @@
       attachRadarNcEvents(lyr);
       lyr.addTo(map);
       radarNcLayer = lyr;
+      wxNcSyncExtras(live ? null : S.ts); /* ОЯ: пересоздать слои остальных станций с тем же кадром */
       if (old) {
         radarNcOld = old;
         var rm = function() { if (radarNcOld === old && map.hasLayer(old)) { map.removeLayer(old); radarNcOld = null; } };
@@ -1274,6 +1356,7 @@
     clearTimeout(radarNcSwapTmr);
     if (radarNcLayer) { if (map.hasLayer(radarNcLayer)) map.removeLayer(radarNcLayer); radarNcLayer = null; }
     if (radarNcOld) { if (map.hasLayer(radarNcOld)) map.removeLayer(radarNcOld); radarNcOld = null; }
+    wxNcClearExtras(); /* доп. станции ОЯ убираем вместе с главным слоем */
     radarNcLoading = false; radarNcErr = null; radarNcFails = 0;
   }
   function setRadarSource(src, auto) {
@@ -1661,6 +1744,38 @@
       var n1 = document.createElement('div'); n1.className = 'li legend-note'; n1.textContent = 'Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + ' · шаг 10 мин'; el.appendChild(n1);
       var n2 = document.createElement('div'); n2.className = 'li legend-note'; n2.textContent = 'Радиальная скорость ДМРЛ · nowcast.ru (Росгидромет/BUFR)'; el.appendChild(n2);
       var n3 = document.createElement('div'); n3.className = 'li legend-note'; n3.textContent = 'Покрытие: Москва/Новосибирск/Владивосток + FMI (не вся РФ)'; el.appendChild(n3);
+      var n4 = document.createElement('div'); n4.className = 'li legend-note'; n4.textContent = 'Клик по карте — скорость (м/с) в точке'; el.appendChild(n4);
+      appendDmrlLegend(el);
+      appendLtgLegend(el);
+      return;
+    }
+    /* ─── БЛОК A: легенда ОЯ-BUFR (wx + nowcast) — ФАКТИЧЕСКАЯ палитра источника.
+       Цвета сняты с GetLegendGraphic bufr_phenomena и сверены по пикселям через
+       GetFeatureInfo → легенда всегда совпадает с картинкой. Реколоризация явлений
+       (как у dBZ) сознательно НЕ делается: цвет здесь кодирует ТИП явления,
+       перекраска под пороговую палитру сайта потеряла бы смысл. ─── */
+    if (S.layer === 'wx' && radarSource === 'nowcast') {
+      setLegendTitle('ПОГОДНЫЕ ЯВЛЕНИЯ · BUFR');
+      WX_NC_PALETTE.forEach(function(p, i) {
+        var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14));
+        var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = p[1];
+        var tt = document.createElement('span'); tt.textContent = p[2];
+        row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
+      });
+      var wxSrcBtn = document.createElement('button');
+      wxSrcBtn.className = 'btn mini-btn on';
+      wxSrcBtn.textContent = 'Источник: nowcast (ДМРЛ)';
+      wxSrcBtn.addEventListener('click', function() { setRadarSource('rainradar', false); });
+      el.appendChild(wxSrcBtn);
+      var wn1 = document.createElement('div'); wn1.className = 'li legend-note';
+      wn1.textContent = 'ОЯ BUFR — опасные явления ДМРЛ (nowcast.ru), палитра источника';
+      el.appendChild(wn1);
+      var wn2 = document.createElement('div'); wn2.className = 'li legend-note';
+      wn2.textContent = 'Станции: Москва · Новосибирск · Владивосток';
+      el.appendChild(wn2);
+      var wn3 = document.createElement('div'); wn3.className = 'li legend-note';
+      wn3.textContent = 'Наведение и клик — тип явления в точке';
+      el.appendChild(wn3);
       appendDmrlLegend(el);
       appendLtgLegend(el);
       return;
@@ -1675,14 +1790,6 @@
       srcBtn.textContent = 'Источник: ' + (radarSource === 'nowcast' ? 'nowcast (ДМРЛ)' : 'rainradar');
       srcBtn.addEventListener('click', function() { setRadarSource(radarSource === 'nowcast' ? 'rainradar' : 'nowcast', false); });
       el.appendChild(srcBtn);
-      if (radarSource === 'nowcast' && S.layer === 'wx') {
-        var wxNote = document.createElement('div'); wxNote.className = 'li legend-note';
-        wxNote.textContent = 'Явления: bufr_phenomena (ДМРЛ) — цвета источника могут отличаться от палитры сайта';
-        el.appendChild(wxNote);
-        var wxNote2 = document.createElement('div'); wxNote2.className = 'li legend-note';
-        wxNote2.textContent = 'Точная палитра сайта и попапы — в режиме rainradar';
-        el.appendChild(wxNote2);
-      }
       if (radarSource === 'nowcast' && S.layer === 'radar') {
         /* Выбор данных nowcast: станции ДМРЛ РФ или композит FMI (Европа) */
         var dataBtn = document.createElement('button');
@@ -1691,7 +1798,7 @@
         dataBtn.addEventListener('click', function() { setRadarNcData((radarNcIdx + 1) % RADAR_NC_LAYERS.length); });
         el.appendChild(dataBtn);
         var ncNote = document.createElement('div'); ncNote.className = 'li legend-note';
-        ncNote.textContent = 'ДМРЛ-покрытие: Москва/Новосибирск/Владивосток; попап и CSV — в режиме rainradar';
+        ncNote.textContent = 'ДМРЛ-покрытие: Москва/Новосибирск/Владивосток; указатель и попап работают; CSV — в режиме rainradar';
         el.appendChild(ncNote);
         if (radarSourceAuto) { var an = document.createElement('div'); an.className = 'li legend-note'; an.textContent = 'Был авто-переход на rainradar — вернитесь кнопкой выше'; el.appendChild(an); }
       }
@@ -1745,9 +1852,73 @@
   var popupVisible = false, crosshairMode = false;
   function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function findPalEntry(r, g, b) { var items = getCurrentPaletteItems(), best = null, bd = 1e9; for (var i = 0; i < items.length; i++) { var p = items[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2], d = dr * dr + dg * dg + db * db; if (d < bd) { bd = d; best = p; } } return bd < 3000 ? { label: best.l, v: best.v } : null; }
+
+  /* ─── Указатель/прицел на nowcast-слоях: цвет пикселя читаем ПРЯМО из WMS-тайла.
+     Тайлы идут через свой прокси /api/nowcastProxy (или dataURL после реколоризации)
+     → canvas не tainted, сети не нужно: работает так же мгновенно, как канвасный
+     режим rainradar. Тайл рисуется в кэш-канвас один раз, дальше — getImageData 1px. */
+  var ncPixCache = new Map(), NC_PIX_MAX = 32; /* src тайла → canvas */
+  function ncTileCanvas(img) {
+    var key = img.src;
+    var c = ncPixCache.get(key);
+    if (c) return c;
+    try {
+      c = document.createElement('canvas');
+      c.width = img.naturalWidth || 256; c.height = img.naturalHeight || 256;
+      c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0);
+    } catch (e) { return null; }
+    if (ncPixCache.size >= NC_PIX_MAX) ncPixCache.delete(ncPixCache.keys().next().value);
+    ncPixCache.set(key, c);
+    return c;
+  }
+  /* ОЯ: цвет → явление по фактической палитре BUFR (nearest, порог как у радара) */
+  function wxNcFindInfo(r, g, b) {
+    var best = -1, bd = 1e9;
+    for (var i = 0; i < WX_NC_RGB.length; i++) {
+      var e = WX_NC_RGB[i], dr = r - e[0], dg = g - e[1], db = b - e[2];
+      var d = dr * dr + dg * dg + db * db;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return (best >= 0 && bd <= 4000) ? { label: WX_NC_PALETTE[best][2], v: WX_NC_PALETTE[best][0] } : null;
+  }
+  function getNcBlockAt(mx, my) {
+    /* главный слой + доп. станции ОЯ: непрозрачный пиксель ищем по всем */
+    var lyrs = [radarNcLayer].concat(wxNcExtras);
+    var latlng = map.containerPointToLatLng(L.point(mx, my));
+    for (var li = 0; li < lyrs.length; li++) {
+      var lyr = lyrs[li];
+      if (!lyr || !lyr._tiles) continue;
+      var z = (lyr._tileZoom != null) ? lyr._tileZoom : map.getZoom();
+      var ts = 256;
+      var pp = map.project(latlng, z);
+      var tx = Math.floor(pp.x / ts), ty = Math.floor(pp.y / ts);
+      var t = lyr._tiles[tx + ':' + ty + ':' + z];
+      if (!t || !t.el || !t.el.complete || !t.el.naturalWidth) continue;
+      var cnv = ncTileCanvas(t.el);
+      if (!cnv) continue;
+      var ix = Math.max(0, Math.min(cnv.width - 1, Math.floor((pp.x - tx * ts) * cnv.width / ts)));
+      var iy = Math.max(0, Math.min(cnv.height - 1, Math.floor((pp.y - ty * ts) * cnv.height / ts)));
+      var pd;
+      try { pd = cnv.getContext('2d').getImageData(ix, iy, 1, 1).data; } catch (e) { continue; }
+      if (pd[3] < 40) continue; /* прозрачно у этой станции — пробуем следующую */
+      /* рамка указателя: границы пикселя изображения → экранные координаты */
+      var fx = ts / cnv.width, fy = ts / cnv.height;
+      var c1 = map.latLngToContainerPoint(map.unproject(L.point(tx * ts + ix * fx, ty * ts + iy * fy), z));
+      var c2 = map.latLngToContainerPoint(map.unproject(L.point(tx * ts + (ix + 1) * fx, ty * ts + (iy + 1) * fy), z));
+      var info = (S.layer === 'wx') ? wxNcFindInfo(pd[0], pd[1], pd[2]) : findPalEntry(pd[0], pd[1], pd[2]);
+      return {
+        sx: Math.round(Math.min(c1.x, c2.x)), sy: Math.round(Math.min(c1.y, c2.y)),
+        sw: Math.max(4, Math.round(Math.abs(c2.x - c1.x))), sh: Math.max(4, Math.round(Math.abs(c2.y - c1.y))),
+        color: 'rgb(' + pd[0] + ',' + pd[1] + ',' + pd[2] + ')', r: pd[0], g: pd[1], b: pd[2],
+        info: info, dbz: -1 /* у WMS-пикселя точного dBZ нет — прицел покажет порог «≥v» */
+      };
+    }
+    return null;
+  }
   
   function getBlockAt(mx, my) { 
-    if ((S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible || radarNcActive()) return null; /* пиксельные данные — только у канвасных слоёв (rainradar) */
+    if ((S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible) return null;
+    if (radarNcActive()) return getNcBlockAt(mx, my); /* nowcast: пиксель читается из WMS-тайла */
     var tiles = visTiles(); 
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], r = tileRect(t.x, t.y); 
@@ -1771,12 +1942,107 @@
     return null; 
   }
   
-  function updateCrosshair() { if (!crosshairMode || S.layer === 'sat') return; var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = 'transparent'; var info = block.info; var txt = '—'; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { txt = Math.round(block.dbz) + ' dBZ | ' + info.label; } else { txt = '≥' + info.v + ' dBZ | ' + info.label; } } else { txt = info.label; } } crosshairLbl.innerHTML = '<span class="ch-swatch" style="background:' + block.color + '"></span>' + txt; /* цвет данных — inline, рамка — токен темы */ crosshairLbl.style.display = 'block'; var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh; if (ly < 8) ly = cy + 50; crosshairLbl.style.left = lx + 'px'; crosshairLbl.style.top = ly + 'px'; } else { hoverEl.style.display = 'none'; crosshairLbl.innerHTML = '<span class="ch-nodata">нет данных</span>'; crosshairLbl.style.display = 'block'; crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px'; crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px'; } }
+  function updateCrosshair() { if (!crosshairMode || S.layer === 'sat') return; var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = 'transparent'; var info = block.info; var txt = '—'; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { txt = Math.round(block.dbz) + ' dBZ | ' + info.label; } else { txt = '≥' + info.v + ' dBZ | ' + info.label; } } else { txt = info.label; } } crosshairLbl.innerHTML = '<span class="ch-swatch" style="background:' + block.color + '"></span>' + txt; /* цвет данных — inline, рамка — токен темы */ crosshairLbl.style.display = 'block'; var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh; if (ly < 8) ly = cy + 50; crosshairLbl.style.left = lx + 'px'; crosshairLbl.style.top = ly + 'px'; } else { hoverEl.style.display = 'none'; crosshairLbl.innerHTML = '<span class="ch-nodata">' + (S.layer === 'dop' ? 'клик — скорость (м/с) в точке' : 'нет данных') + '</span>'; crosshairLbl.style.display = 'block'; crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px'; crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px'; } }
   function toggleCrosshair() { crosshairMode = !crosshairMode; var btn = $('btn-crosshair'); if (crosshairMode) { btn.classList.add('on'); crosshairEl.style.display = 'block'; updateCrosshair(); } else { btn.classList.remove('on'); crosshairEl.style.display = 'none'; crosshairLbl.style.display = 'none'; hoverEl.style.display = 'none'; } if (S.ruler.active) toggleRuler(); }
   function showPopup(block, mx, my) { var info = block.info; var lbl = info ? escHtml(info.label) : '—'; var meta = ''; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info.label; } else { meta = 'Слой: <b>Отражаемость</b><br>Порог: ≥' + info.v + ' dBZ<br>Категория: ' + info.label; } } else { meta = 'Слой: <b>Явления</b><br>' + info.label; } } else { meta = 'Нет данных'; } popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color + '"></div><div class="popup-label">' + lbl + '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>'; popupEl.style.display = 'block'; popupEl.classList.remove('popup-in'); void popupEl.offsetWidth; popupEl.classList.add('popup-in'); var px2 = mx + 16, py2 = my - 55; if (px2 + 230 > innerWidth - 8) px2 = mx - 246; if (py2 < 8) py2 = 8; if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118; popupEl.style.left = px2 + 'px'; popupEl.style.top = py2 + 'px'; popupVisible = true; }
   function hidePopup() { popupEl.style.display = 'none'; popupVisible = false; }
+
+  /* ─── БЛОК A: попап ОЯ-BUFR через WMS GetFeatureInfo (nowcast) ───
+     Ответ nowcast — HTML со строкой «var value=N», N — код явления BUFR
+     (расшифровка в WX_NC_CODES, таблица снята с живого ответа сервера).
+     Запрашиваем крошечный bbox 11×11 px вокруг точки клика в EPSG:4326 —
+     точное попадание без искажений меркатора. Прокси пробрасывает query 1:1. */
+  var wxNcGfiSeq = 0; /* защита от гонки: показываем только последний ответ */
+  function wxNcQueryStation(st, latlng, time) {
+    var d = 0.03;
+    var url = '/api/nowcastProxy?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo' +
+      '&LAYERS=' + st.id + '&QUERY_LAYERS=' + st.id +
+      '&SRS=EPSG:4326&BBOX=' + (latlng.lng - d) + ',' + (latlng.lat - d) + ',' + (latlng.lng + d) + ',' + (latlng.lat + d) +
+      '&WIDTH=11&HEIGHT=11&X=5&Y=5&FORMAT=image%2Fpng&INFO_FORMAT=text%2Fhtml' +
+      (time ? '&TIME=' + encodeURIComponent(time) : '');
+    return fetch(url)
+      .then(function(r) { return r.ok ? r.text() : ''; })
+      .then(function(txt) { var m = /var value=(\d+)/.exec(txt); return { st: st, code: m ? parseInt(m[1], 10) : null }; })
+      .catch(function() { return { st: st, code: null }; });
+  }
+  function wxNcColorFor(code) {
+    for (var i = 0; i < WX_NC_PALETTE.length; i++) if (WX_NC_PALETTE[i][0] === code) return WX_NC_PALETTE[i][1];
+    return 'rgba(128,128,128,0.35)';
+  }
+  /* Позиционирование попапа — тот же расчёт, что в showPopup */
+  function placePopup(mx, my) {
+    popupEl.style.display = 'block'; popupEl.classList.remove('popup-in'); void popupEl.offsetWidth; popupEl.classList.add('popup-in');
+    var px2 = mx + 16, py2 = my - 55;
+    if (px2 + 230 > innerWidth - 8) px2 = mx - 246;
+    if (py2 < 8) py2 = 8;
+    if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118;
+    popupEl.style.left = px2 + 'px'; popupEl.style.top = py2 + 'px'; popupVisible = true;
+  }
+  function wxNcShowPopup(latlng, mx, my) {
+    var seq = ++wxNcGfiSeq;
+    var t = new Date(S.ts * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+    var closeBtn = '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+    /* мгновенный отклик: попап со статусом, ответ подставим по готовности */
+    popupEl.innerHTML = '<div class="popup-header"><div class="popup-label">⏳ Запрос явления…</div></div>' +
+      '<div class="popup-meta">ОЯ BUFR · nowcast.ru · кадр ' + t + ' МСК</div>' + closeBtn;
+    placePopup(mx, my);
+    var live = S.ts >= nowTs();
+    var time = live ? null : satIso(S.ts); /* исторический кадр — тот же TIME, что у слоя */
+    Promise.all(WX_NC_LAYERS.map(function(st) { return wxNcQueryStation(st, latlng, time); })).then(function(res) {
+      if (seq !== wxNcGfiSeq || !popupVisible) return; /* пришёл более новый клик / попап закрыт */
+      /* станции не пересекаются: значимый ответ максимум у одной — берём максимальный код */
+      var best = null;
+      res.forEach(function(r) { if (r.code !== null && r.code !== 255 && (best === null || r.code > best.code)) best = r; });
+      var lbl, meta, color;
+      if (!best) {
+        lbl = 'Вне зоны покрытия BUFR'; color = 'rgba(128,128,128,0.35)';
+        meta = 'Станции: Москва · Новосибирск · Владивосток<br>Кадр: ' + t + ' МСК';
+      } else {
+        lbl = WX_NC_CODES[best.code] || ('код ' + best.code);
+        color = wxNcColorFor(best.code);
+        meta = 'Слой: <b>ОЯ BUFR</b> (nowcast.ru)<br>Станция: ' + escHtml(best.st.label) + '<br>Код явления: ' + best.code + '<br>Кадр: ' + t + ' МСК';
+      }
+      popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + color + '"></div><div class="popup-label">' + escHtml(lbl) + '</div></div>' +
+        '<div class="popup-meta">' + meta + '</div>' + closeBtn;
+    });
+  }
+
+  /* ─── Указатель на доплере: радиальная скорость в точке через GetFeatureInfo.
+     Формула конвертации — из собственного скрипта nowcast (виден в ответе
+     GetFeatureInfo): value=1 → нет эха; иначе v = 63.5·(−1 + (value−1)·2/254) м/с.
+     Отрицательные — К радару, положительные — ОТ радара. ─── */
+  function dopShowPopup(latlng, mx, my) {
+    var seq = ++wxNcGfiSeq; /* общий guard от гонки с попапом ОЯ */
+    var t = new Date(S.ts * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+    var closeBtn = '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+    popupEl.innerHTML = '<div class="popup-header"><div class="popup-label">⏳ Запрос скорости…</div></div>' +
+      '<div class="popup-meta">Доплер ДМРЛ · nowcast.ru · ' + DOP_HEIGHTS[dopHeightIdx].label + '</div>' + closeBtn;
+    placePopup(mx, my);
+    var live = S.ts >= nowTs();
+    var time = live ? null : satIso(S.ts);
+    wxNcQueryStation({ id: DOP_HEIGHTS[dopHeightIdx].id, label: DOP_HEIGHTS[dopHeightIdx].label }, latlng, time).then(function(r) {
+      if (seq !== wxNcGfiSeq || !popupVisible) return;
+      var lbl, meta, color;
+      if (r.code === null) {
+        lbl = 'Вне зоны покрытия'; color = 'rgba(128,128,128,0.35)';
+        meta = 'Покрытие ДМРЛ: Москва/Новосибирск/Владивосток<br>Кадр: ' + t + ' МСК';
+      } else if (r.code <= 1) {
+        lbl = 'Нет эха'; color = 'rgba(128,128,128,0.35)';
+        meta = 'Слой: <b>Радиальная скорость</b><br>Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + '<br>Кадр: ' + t + ' МСК';
+      } else {
+        var v = 63.5 * (-1 + (r.code - 1) * 2 / 254);
+        var dir = v < -1 ? 'к радару' : (v > 1 ? 'от радара' : 'поперёк луча');
+        lbl = (v > 0 ? '+' : '') + v.toFixed(1) + ' м/с (' + dir + ')';
+        color = v < -1 ? '#16a34a' : (v > 1 ? '#dc2626' : '#d1d5db'); /* цвета легенды доплера */
+        meta = 'Слой: <b>Радиальная скорость</b> (nowcast.ru)<br>Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + '<br>Код пикселя: ' + r.code + '<br>Кадр: ' + t + ' МСК';
+      }
+      popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + color + '"></div><div class="popup-label">' + escHtml(lbl) + '</div></div>' +
+        '<div class="popup-meta">' + meta + '</div>' + closeBtn;
+    });
+  }
+
   map.on('mousemove', function(e) { if (crosshairMode) { requestAnimationFrame(updateCrosshair); return; } if (S.layer === 'sat') return; var p = e.containerPoint, block = getBlockAt(p.x, p.y); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none'; });
-  map.on('click', function(e) { if (S.ruler.active || S.layer === 'sat') return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint, block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
+  map.on('click', function(e) { if (S.ruler.active || S.layer === 'sat') return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint; var ll = crosshairMode ? map.containerPointToLatLng(L.point(p.x, p.y)) : e.latlng; if (S.layer === 'dop') { dopShowPopup(ll, p.x, p.y); return; } /* доплер: скорость в точке */ if (S.layer === 'wx' && radarNcActive()) { /* БЛОК A: тип явления в точке — через GetFeatureInfo */ wxNcShowPopup(ll, p.x, p.y); return; } var block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
 
   var modal = $('palette-modal'), modalClose = $('modal-close'), modalTabs = document.querySelectorAll('.modal-tabs button'), paletteListContainer = $('palette-list-container'), loadPaletteBtn = $('load-palette-btn'), fileInput = $('file-input'), createPaletteBtn = $('create-palette-btn'), deletePaletteBtn = $('delete-palette-btn'), exportPaletteBtn = $('export-palette-btn'), createForm = $('create-form'), newPalName = $('new-pal-name'), entryVal = $('entry-val'), entryColor = $('entry-color'), entryLabel = $('entry-label'), addEntryBtn = $('add-entry-btn'), entriesList = $('entries-list'), savePaletteBtn = $('save-palette-btn'), cancelCreateBtn = $('cancel-create-btn');
   var currentLayerForModal = 'radar'; var tempEntries = []; var editingIndex = -1; var editingEntryIndex = -1;
@@ -1848,6 +2114,7 @@
       } else {
         canvas.style.opacity = val / 100;
         if (radarNcLayer && S.dbzVisible) radarNcLayer.setOpacity(val / 100); /* WMS-радар nowcast */
+        if (S.dbzVisible) wxNcExtras.forEach(function(l) { l.setOpacity(val / 100); }); /* доп. станции ОЯ BUFR */
       }
       opacityVal.textContent = val + '%';
       retrig(opacityVal, 'bump'); /* лёгкий отклик значения */
@@ -2069,6 +2336,13 @@
     }
     var items = getCurrentPaletteItems();
     var o = { title: S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ', grad: null, gradCaps: null, rows: [], notes: [] };
+    if (S.layer === 'wx' && radarSource === 'nowcast') {
+      /* БЛОК A: в композит — фактическая палитра ОЯ-BUFR (как на экране) */
+      o.title = 'ПОГОДНЫЕ ЯВЛЕНИЯ · BUFR';
+      WX_NC_PALETTE.forEach(function(p) { o.rows.push([p[1], p[2]]); });
+      o.notes.push('nowcast.ru · станции: Москва/Новосибирск/Владивосток');
+      return o;
+    }
     if (S.layer === 'radar') o.notes.push(radarNcActive() ? 'Источник: nowcast.ru (ДМРЛ)' : 'Источник: rainradar.ru');
     items.forEach(function(p) { o.rows.push(['rgb(' + p.r.join(',') + ')', p.l]); });
     try { var pl = palettes[S.layer]; var pn = pl.list[pl.activeIdx].name; if (pn) o.notes.push('Палитра: ' + pn); } catch (e) {}
@@ -2203,6 +2477,7 @@
       if (S.dbzVisible && radarNcLayer) {
         octx.save(); octx.globalAlpha = (parseInt($('opacity-slider').value) || 100) / 100;
         drawTileLayerTo(octx, radarNcLayer);
+        wxNcExtras.forEach(function(l) { drawTileLayerTo(octx, l); }); /* доп. станции ОЯ BUFR */
         octx.restore();
       }
     } else {
@@ -2252,7 +2527,7 @@
       dmrl: (S.layer === 'dmrl' || dmrlOverlayOn) ? true : undefined,
       dmrl_range_km: (S.layer === 'dmrl' || dmrlOverlayOn) ? DMRL_RANGE_KM : undefined,
       doppler: S.layer === 'dop' ? true : undefined,
-      radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? 'nowcast.ru (' + (S.layer === 'wx' ? 'bufr_phenomena' : RADAR_NC_LAYERS[radarNcIdx].id) + ')' : 'rainradar.ru') : undefined,
+      radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? 'nowcast.ru (' + (S.layer === 'wx' ? 'BUFR: ' + WX_NC_LAYERS.map(function(l) { return l.id; }).join(' + ') : RADAR_NC_LAYERS[radarNcIdx].id) + ')' : 'rainradar.ru') : undefined,
       doppler_source: S.layer === 'dop' ? 'nowcast.ru — радиальная скорость ДМРЛ (' + DOP_HEIGHTS[dopHeightIdx].label + ')' : undefined,
       legend_pos: isComposite ? LEGEND_POS : undefined,
       sat_backdrop: isComposite && satBackdropActive() ? 'dark_all под спутником' : undefined,
@@ -2390,6 +2665,7 @@
           var oc = document.createElement('canvas'); oc.width = W; oc.height = H;
           var octx2 = oc.getContext('2d'); octx2.setTransform(DPR, 0, 0, DPR, 0, 0);
           var drawn = drawTileLayerTo(octx2, radarNcLayer);
+          wxNcExtras.forEach(function(l) { drawn += drawTileLayerTo(octx2, l); }); /* станции ОЯ BUFR */
           if (!drawn) { toast('Тайлы nowcast ещё не загружены'); return; }
           var rcN = { canvas: oc, missing: 0, total: drawn, w: W, h: H };
           var duN = oc.toDataURL('image/png');
