@@ -348,10 +348,13 @@
      (не SCP NOAA). COMPOSITE — WMS-композиты отражаемости через /api/nowcastProxy. */
   var SAT_PRODUCTS = [
     { id: 'composite', label: 'COMPOSITE (композит dBZ)', kind: 'wms' },
+    { id: 'height', label: 'Высота ВГО (BUFR)', kind: 'wms' }, /* верхняя граница облаков по ДМРЛ */
     { id: 'cape', label: 'CAPE (конвективная энергия)', kind: 'grid' },
     { id: 'cin', label: 'CIN (задерживающая энергия)', kind: 'grid' },
     { id: 'scp', label: 'SUPERCELL (оценка SCP)', kind: 'grid' }
   ];
+  /* Все станции ВГО одним LAYERS через запятую — как в демо источника 4x4 */
+  var HEIGHT_NC_LAYERS = 'bufr_height,bufr_novosib_height,bufr_vlad_height';
   var satProduct = null; /* null = обычный канал EUMETSAT */
   try { var savedProd = localStorage.getItem('satProduct'); if (SAT_PRODUCTS.some(function(p) { return p.id === savedProd; })) satProduct = savedProd; } catch (e) {}
   function prodActive() { return S.layer === 'sat' && !!satProduct; }
@@ -378,7 +381,7 @@
 
   /* LRU-кэш готовых тайлов (dataURL по полному URL — включает канал и time).
      Повторный кадр таймлайна/возврат на позицию = 0 сетевых запросов. */
-  var satTileCache = new Map(), SAT_CACHE_MAX = 200;
+  var satTileCache = new Map(), SAT_CACHE_MAX = IS_MOBILE ? 200 : 450; /* прогрев нескольких слоёв × видимые тайлы (~30КБ/тайл ≈ 13МБ максимум на десктопе) */
   function satCacheSet(url, dataUrl) {
     if (satTileCache.has(url)) satTileCache.delete(url);
     else if (satTileCache.size >= SAT_CACHE_MAX) satTileCache.delete(satTileCache.keys().next().value);
@@ -392,7 +395,12 @@
   var satQueue = [], satActiveReq = 0, SAT_MAX_PAR = 6;
   function satPump() {
     while (satActiveReq < SAT_MAX_PAR && satQueue.length) {
-      var job = satQueue.shift();
+      /* Приоритет: тайлы АКТИВНЫХ слоёв (pri 0) раньше фонового прогрева (pri 1) —
+         префетч не голодит видимую карту */
+      var idx = -1;
+      for (var qi = 0; qi < satQueue.length; qi++) { if (!satQueue[qi].pri) { idx = qi; break; } }
+      if (idx < 0) idx = 0;
+      var job = satQueue.splice(idx, 1)[0];
       /* Тайл мог быть снят Leaflet'ом до старта загрузки (быстрое панорамирование) */
       if (job.tile._satAborted) continue;
       satActiveReq++;
@@ -400,13 +408,14 @@
       job.tile.src = job.url;
       /* Таймаут отсчитываем от фактического старта запроса, а не постановки в очередь */
       (function(tile) {
+        var tmo = tile._satTimeoutMs || 12000;
         tile._satTimer = setTimeout(function() {
           if (!tile._satDone && !tile._satAborted) {
             tile._satTimedOut = true;
-            console.warn('[sat] таймаут тайла (12с):', tile._satUrl);
+            console.warn('[sat] таймаут тайла (' + Math.round(tmo / 1000) + 'с):', tile._satUrl);
             tile.src = ''; /* провоцируем error → штатный путь retry в tileerror */
           }
-        }, 12000);
+        }, tmo);
       })(job.tile);
     }
   }
@@ -425,21 +434,38 @@
     createTile: function(coords, done) {
       var tile = document.createElement('img');
       var self = this;
-      /* Таймаут тайла: если за 12с не пришли ни load, ни error — тайм-аут
-         (типичный симптом деградации маршрута); таймер ставит satPump при старте запроса */
-      L.DomEvent.on(tile, 'load', function() { tile._satDone = true; clearTimeout(tile._satTimer); satRelease(tile); self._tileOnLoad(done, tile); });
+      /* Таймаут тайла: 4x4-прокси получает 16с (холодный старт функции + апстрим),
+         остальное — 12с; если за это время ни load, ни error — тайм-аут */
+      L.DomEvent.on(tile, 'load', function() {
+        tile._satDone = true; clearTimeout(tile._satTimer); satRelease(tile);
+        /* Универсальный кэш оригиналов: спутник, ВСЕ 4x4-слои и префетч — одна точка.
+           (attachSatEvents кэширует только EUMETSAT; nowcast-тайлы раньше в кэш не попадали —
+           одна из причин «данные не прогружаются» после переключений) */
+        if (!tile._fromCache && tile._satUrl && tile.src && tile.src.indexOf('data:') !== 0 && !satTileCache.has(tile._satUrl)) {
+          enqueueTile({ run: function() {
+            try {
+              if (tile._recolored || satTileCache.has(tile._satUrl)) return; /* оригинал уже заменён/закэширован */
+              var c = document.createElement('canvas'); c.width = c.height = 256;
+              c.getContext('2d').drawImage(tile, 0, 0, 256, 256);
+              satCacheSet(tile._satUrl, c.toDataURL());
+            } catch (err) { /* нет CORS — кэш недоступен, тайл всё равно показывается */ }
+          } });
+        }
+        self._tileOnLoad(done, tile);
+      });
       L.DomEvent.on(tile, 'error', function(e) { tile._satDone = true; clearTimeout(tile._satTimer); satRelease(tile); self._tileOnError(done, tile, e); });
       tile.alt = ''; tile.setAttribute('role', 'presentation');
       tile.crossOrigin = 'anonymous'; /* для fallback на прямой эндпоинт; на прокси (свой домен) безвреден */
       var url = this.getTileUrl(coords);
       tile._satUrl = url;
+      tile._satTimeoutMs = this.options.tileTimeout || (url.indexOf('/api/nowcastProxy') === 0 ? 16000 : 12000);
       var cached = satTileCache.get(url);
       if (cached) { /* мгновенно из кэша, LRU-обновление */
         satCacheSet(url, cached);
         tile._fromCache = true;
         tile.src = cached;
       } else {
-        satQueue.push({ tile: tile, url: url });
+        satQueue.push({ tile: tile, url: url, pri: this.options.prefetch ? 1 : 0 });
         satPump();
       }
       return tile;
@@ -544,6 +570,7 @@
         tries[k] = n + 1;
         setTimeout(function() { if (map.hasLayer(lyr) && e.tile && !e.tile._satAborted) { e.tile._satDone = false; e.tile._satTimedOut = false; e.tile.src = lyr.getTileUrl(e.coords); } }, 1000 * Math.pow(2, n));
       } else {
+        if (lyr.options && lyr.options.prefetch) return; /* префетч тихий: без счётчиков, тостов, чипа и fallback */
         satFailStreak++;
         if (lyr === eumetsatLayer) { satLoading = false; $('pulse').classList.remove('busy'); } /* не висим в .busy вечно */
         var now = Date.now();
@@ -626,9 +653,9 @@
   }
 
   /* ─── Время: сетка и глубина истории зависят от слоя (радар 10 мин / спутник 15 мин) ─── */
-  function stepSec() { if (S.layer === 'sat' && satProduct === 'composite') return 600; return S.layer === 'sat' ? SAT_STEP : (S.layer === 'dop' ? 600 : STEP); }   /* доплер/композит: шаг 10 мин */
-  function delaySec() { if (S.layer === 'sat' && satProduct === 'composite') return 900; return S.layer === 'sat' ? SAT_DELAY : (S.layer === 'dop' ? 900 : DELAY); } /* задержка публикации BUFR ~15 мин */
-  function histSec() { if (S.layer === 'sat' && satProduct === 'composite') return 3 * 3600; return S.layer === 'sat' ? SAT_HISTORY_SEC : (S.layer === 'dop' ? 3 * 3600 : MAX_HISTORY_SEC); } /* история 3 ч */
+  function stepSec() { if (S.layer === 'sat' && (satProduct === 'composite' || satProduct === 'height')) return 600; return S.layer === 'sat' ? SAT_STEP : (S.layer === 'dop' ? 600 : STEP); }   /* доплер/композит: шаг 10 мин */
+  function delaySec() { if (S.layer === 'sat' && (satProduct === 'composite' || satProduct === 'height')) return 900; return S.layer === 'sat' ? SAT_DELAY : (S.layer === 'dop' ? 900 : DELAY); } /* задержка публикации BUFR ~15 мин */
+  function histSec() { if (S.layer === 'sat' && (satProduct === 'composite' || satProduct === 'height')) return 3 * 3600; return S.layer === 'sat' ? SAT_HISTORY_SEC : (S.layer === 'dop' ? 3 * 3600 : MAX_HISTORY_SEC); } /* история 3 ч */
   function nowTs() { return Math.floor((Date.now() / 1000 - delaySec()) / stepSec()) * stepSec(); }
   function minTs() { return nowTs() - histSec(); }
   S.ts = nowTs();
@@ -764,7 +791,8 @@
       var old = prodWmsLayer;
       if (prodWmsOld && map.hasLayer(prodWmsOld)) { map.removeLayer(prodWmsOld); prodWmsOld = null; }
       var params = {
-        layers: COMPOSITE_REGIONS[compositeRegionIdx].id,
+        /* height — все станции ВГО одним слоем; composite — выбранный регион */
+        layers: satProduct === 'height' ? HEIGHT_NC_LAYERS : COMPOSITE_REGIONS[compositeRegionIdx].id,
         format: 'image/png', transparent: true, version: '1.1.1',
         crs: L.CRS.EPSG4326, tileSize: 256, zIndex: 11, maxZoom: 10,
         updateWhenIdle: false, keepBuffer: 2, opacity: satOpacityMem / 100
@@ -978,6 +1006,7 @@
     satProduct = id;
     try { if (id) localStorage.setItem('satProduct', id); else localStorage.removeItem('satProduct'); } catch (e) {}
     if (S.layer !== 'sat') { syncChannelUI(); return; } /* применится при входе в sat */
+    satPrefetchCancel(); /* активный продукт сменился — пересобрать план прогрева */
     if (prev) prodExit();
     if (id) {
       prodEnter();
@@ -999,7 +1028,8 @@
     if (pd.kind === 'wms') {
       var live = S.ts >= nowTs();
       var tstr = new Date((live ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-      setChip('COMPOSITE · 4x4 (' + COMPOSITE_REGIONS[compositeRegionIdx].label + ') · ' + tstr + ' МСК' + (live ? ' (LIVE)' : '') + (prodWmsErr ? ' · ⚠️ ошибки тайлов' : '') + ltgChipSuffix());
+      var head = satProduct === 'height' ? 'Высота ВГО · 4x4 (BUFR)' : 'COMPOSITE · 4x4 (' + COMPOSITE_REGIONS[compositeRegionIdx].label + ')';
+      setChip(head + ' · ' + tstr + ' МСК' + (live ? ' (LIVE)' : '') + (prodWmsErr ? ' · ⚠️ ошибки тайлов' : '') + ltgChipSuffix());
     } else {
       var hstr = (prodGrid.times && prodGrid.times[prodGrid.hourIdx])
         ? new Date(Date.parse(prodGrid.times[prodGrid.hourIdx] + 'Z')).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : '—';
@@ -1362,43 +1392,77 @@
   if ($('btn-ltg')) $('btn-ltg').addEventListener('click', function() { setLtg(!ltg.on); });
   resizeLtgCanvas();
 
-  /* ═══ БЛОК B: фоновый прогрев спутника ═══
-     Способ: невидимый WMS-слой (opacity:0) на карте. Почему не new Image() вручную:
-     слой использует тот же пул satQueue (≤6), те же события/retry и сам выбирает
-     ВИДИМЫЕ тайлы; кэширование оригиналов уже делает attachSatEvents ('tileload'),
-     а шумные ветки (чип/pulse) отфильтрованы условием lyr === eumetsatLayer.
-     Радар не страдает: его тайлы — обычные Image вне пула спутника.
+  /* ═══ БЛОК C: фоновый прогрев ВСЕХ слоёв (обобщение прежнего satPrefetch) ═══
+     Способ: невидимые WMS-слои (opacity:0) ПО ОЧЕРЕДИ — один за раз, пул ≤6 общий,
+     префетч-тайлы идут с пониженным приоритетом (pri 1 в satQueue) и не голодят
+     активный слой. Кэш оригиналов пишет универсальный хук в SatWMS.createTile →
+     satTileCache (LRU по URL: слой+TIME — ключи не пересекаются).
+     НЕЗАМЕТНОСТЬ: nowcast-префетч-слоям НЕ вешаем attach*Events (чип/pulse/тосты
+     не трогаются); у спутника attachSatEvents сам фильтрует шум (lyr !== eumetsatLayer).
+     Прогреваем только LIVE-кадр видимой области; активный слой пропускаем.
      Это сеть, не анимация — reduce-motion прогрев НЕ отключает. */
-  var satPrefetchLayer = null, satPrefetchTmr = null, satPrefetchInterval = null;
-  function satPrefetchCancel() {
-    clearTimeout(satPrefetchTmr); satPrefetchTmr = null;
-    if (satPrefetchLayer) { if (map.hasLayer(satPrefetchLayer)) map.removeLayer(satPrefetchLayer); satPrefetchLayer = null; }
+  var prefetchCur = null, prefetchTmr = null, prefetchQueue = [];
+  function prefetchNcParams(layers) {
+    return { layers: layers, format: 'image/png', transparent: true, version: '1.1.1',
+      crs: L.CRS.EPSG4326, tileSize: 256, zIndex: 1, maxZoom: 10, updateWhenIdle: true,
+      keepBuffer: 0, opacity: 0, prefetch: true }; /* prefetch:true → пониженный приоритет пула */
   }
-  function satPrefetchRun() {
-    if (S.layer === 'sat' || document.visibilityState === 'hidden') return;
-    satPrefetchCancel();
-    /* LIVE-кадр текущего канала, невидимо (opacity 0) */
-    var lyr = createEumetsatLayer(0, SAT_CHANNELS[satChIdx], null);
-    attachSatEvents(lyr); /* кэш оригиналов + реколоризация прогреются тоже */
+  function prefetchTargets() {
+    var t = [];
+    /* Порядок = приоритет; активный слой не прогреваем (он и так на карте) */
+    if (!radarNcActive()) t.push({ nc: RADAR_NC_LAYERS[radarNcIdx].id });                       /* радар 4x4 */
+    if (!(S.layer === 'wx' && radarSource === 'nowcast')) WX_NC_LAYERS.forEach(function(st) { t.push({ nc: st.id }); }); /* ОЯ: все станции */
+    if (S.layer !== 'dop') t.push({ nc: DOP_HEIGHTS[dopHeightIdx].id });                        /* доплер (текущая высота) */
+    if (!(prodActive() && satProduct === 'composite')) t.push({ nc: COMPOSITE_REGIONS[compositeRegionIdx].id });
+    if (!(prodActive() && satProduct === 'height')) t.push({ nc: HEIGHT_NC_LAYERS });           /* высота ВГО */
+    if (!(S.layer === 'sat' && !satProduct)) t.push({ sat: true });                             /* спутник (текущий канал) */
+    return t;
+  }
+  function prefetchCancel() {
+    clearTimeout(prefetchTmr); prefetchTmr = null; prefetchQueue = [];
+    if (prefetchCur) { if (map.hasLayer(prefetchCur)) map.removeLayer(prefetchCur); prefetchCur = null; }
+  }
+  function prefetchStep() {
+    if (document.visibilityState === 'hidden') { prefetchCancel(); return; }
+    if (prefetchCur) return; /* уже греется — следующий встанет по done */
+    var tgt = prefetchQueue.shift();
+    if (!tgt) return;
+    var lyr;
+    if (tgt.sat) {
+      lyr = createEumetsatLayer(0, SAT_CHANNELS[satChIdx], null);
+      lyr.options.prefetch = true;
+      attachSatEvents(lyr); /* кэш+реколоризация спутника; шумные ветки отфильтрованы */
+    } else {
+      lyr = new SatWMS('/api/nowcastProxy', prefetchNcParams(tgt.nc)); /* БЕЗ attach*: тихо */
+    }
     lyr.addTo(map);
-    satPrefetchLayer = lyr;
-    var done = function() { if (satPrefetchLayer === lyr) { if (map.hasLayer(lyr)) map.removeLayer(lyr); satPrefetchLayer = null; } };
-    lyr.once('load', function() { setTimeout(done, 500); }); /* тайлы в кэше — слой больше не нужен */
-    setTimeout(done, 25000); /* страховка при ошибках сети */
+    prefetchCur = lyr;
+    var done = function() {
+      if (prefetchCur !== lyr) return;
+      if (map.hasLayer(lyr)) map.removeLayer(lyr);
+      prefetchCur = null;
+      prefetchTmr = setTimeout(prefetchStep, 400); /* пауза между слоями — пул дышит */
+    };
+    lyr.once('load', function() { setTimeout(done, 500); }); /* тайлы в кэше — слой не нужен */
+    setTimeout(done, 20000); /* страховка при ошибках сети */
   }
-  function satPrefetchSchedule(delay) {
-    if (S.layer === 'sat') return;
-    clearTimeout(satPrefetchTmr);
-    satPrefetchTmr = setTimeout(satPrefetchRun, delay);
+  function prefetchSchedule(delay) {
+    clearTimeout(prefetchTmr);
+    prefetchTmr = setTimeout(function() {
+      prefetchQueue = prefetchTargets();
+      if (!prefetchCur) prefetchStep();
+    }, delay);
   }
-  /* Старт через ~2.5с после загрузки (не мешаем радару), после перемещений — idle 5с,
-     каждые 5 мин — освежаем LIVE-кадр в кэше */
-  setTimeout(function() { satPrefetchSchedule(2500); }, 0);
-  map.on('moveend', function() { if (S.layer !== 'sat') satPrefetchSchedule(5000); });
-  satPrefetchInterval = setInterval(function() { if (document.visibilityState !== 'hidden') satPrefetchSchedule(0); }, 5 * 60 * 1000);
+  /* Совместимость: точки вызова старого satPrefetch (setLayer и т.п.) */
+  function satPrefetchCancel() { prefetchCancel(); prefetchSchedule(6000); /* активный слой сменился — пересобрать список */ }
+  /* Старт через ~3с (не мешаем первичному показу), после перемещений — idle 4с,
+     каждые 5 мин — освежаем LIVE-кадры всех слоёв в кэше */
+  setTimeout(function() { prefetchSchedule(3000); }, 0);
+  map.on('moveend', function() { prefetchSchedule(4000); });
+  setInterval(function() { if (document.visibilityState !== 'hidden') prefetchSchedule(0); }, 5 * 60 * 1000);
   document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'hidden') satPrefetchCancel();
-    else satPrefetchSchedule(3000);
+    if (document.visibilityState === 'hidden') prefetchCancel();
+    else prefetchSchedule(2500);
   });
 
   /* ═══ БЛОК D: «Доплер» — ТОЛЬКО радиальная скорость ДМРЛ (nowcast.ru).
@@ -1710,14 +1774,33 @@
     }
     buildLegend(); schedRender();
   }
-  function setRadarNcData(idx) {
-    if (idx < 0 || idx >= RADAR_NC_LAYERS.length || idx === radarNcIdx) return;
+  function setRadarNcData(idx) {    if (idx < 0 || idx >= RADAR_NC_LAYERS.length || idx === radarNcIdx) return;
     radarNcIdx = idx;
     try { localStorage.setItem('radarNcLayer', RADAR_NC_LAYERS[idx].id); } catch (e) {}
     if (radarNcActive()) radarNcApply(true);
     buildLegend();
     toast('Данные: ' + RADAR_NC_LAYERS[idx].label);
   }
+  /* ─── БЛОК B: самолечение 4x4-слоёв. Если тайлы падали (retry исчерпаны — Leaflet
+     оставляет «дыры» до смены кадра), раз в 20с пересоздаём слой: закэшированные
+     тайлы вернутся мгновенно из satTileCache, упавшие — запросятся заново.
+     Failed НЕ вечен (в отличие от спутника с историей — тут LIVE-данные). ─── */
+  setInterval(function() {
+    if (document.visibilityState === 'hidden') return;
+    if (radarNcActive() && radarNcErr && !S.playing) { radarNcErr = null; radarNcFails = 0; radarNcApply(true); }
+    if (S.layer === 'dop' && nowcastErr && !S.playing) { nowcastErr = null; nowcastFails = 0; nowcastApplyTime(true); }
+    if (prodActive() && prodDef().kind === 'wms' && prodWmsErr) { prodWmsErr = false; prodWmsApply(true); }
+  }, 20000);
+  /* ─── БЛОК B: авто-возврат на 4x4 после авто-fallback на rainradar.
+     Раз в 5 мин — один дешёвый пробный запрос LIVE-тайла; вернёмся только при успехе
+     (полуживой сервер не дёргаем чаще). ─── */
+  setInterval(function() {
+    if (!radarSourceAuto || document.visibilityState === 'hidden') return;
+    if (S.layer !== 'radar' && S.layer !== 'wx') return;
+    fetch('/api/nowcastProxy?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=bufr_dbz1&SRS=EPSG:4326&BBOX=35,53,41,58&WIDTH=64&HEIGHT=64&FORMAT=image%2Fpng&TRANSPARENT=true', { cache: 'no-store' })
+      .then(function(r) { if (r.ok && radarSourceAuto) { toast('✅ 4x4 снова доступен — возвращаюсь'); setRadarSource('nowcast', false); } })
+      .catch(function() { /* всё ещё лежит — остаёмся на rainradar */ });
+  }, 5 * 60 * 1000);
   /* Возврат на вкладку: LIVE-кадр мог устареть — обновляем сразу */
   document.addEventListener('visibilitychange', function() {
     if (document.visibilityState === 'visible' && radarNcActive() && !S.playing && !S.manualTime) {
@@ -1821,6 +1904,7 @@
     $('btn-layers-menu').textContent = 'Слои: ' + (LAYER_LABELS[S.layer] || S.layer);
 
     stopPlay();
+    satPrefetchCancel(); /* смена слоя: снять текущий префетч и пересобрать план прогрева */
     /* Смена слоя всегда возвращает видимость dBZ — предсказуемо для пользователя */
     S.dbzVisible = true;
     /* Уборка спец-слоёв (ДМРЛ/доплер) — идемпотентно при любом переходе */
@@ -1999,6 +2083,22 @@
         row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
       };
       var mkNote = function(text) { var n = document.createElement('div'); n.className = 'li legend-note'; n.textContent = text; el.appendChild(n); };
+      if (satProduct === 'height') {
+        setLegendTitle('ВЫСОТА ВГО · BUFR (ДМРЛ)');
+        /* Шкала — КАРТИНКОЙ GetLegendGraphic самого источника через прокси:
+           гарантированно совпадает с фактической палитрой тайлов (свою не выдумываем).
+           Конвертация значений (из GetFeatureInfo источника): высота = (код−2)/10 км. */
+        var hImg = document.createElement('img');
+        hImg.src = '/api/nowcastProxy?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetLegendGraphic&LAYER=bufr_height&FORMAT=image%2Fpng';
+        hImg.alt = 'Шкала высоты ВГО'; hImg.className = 'li';
+        hImg.style.maxWidth = '100%'; hImg.style.borderRadius = '6px';
+        el.appendChild(hImg);
+        mkNote('Высота верхней границы облаков, км — палитра источника 4x4');
+        mkNote('Станции: Москва · Новосибирск · Владивосток · шаг 10 мин');
+        mkNote('Клик по карте — высота в точке');
+        appendLtgLegend(el);
+        return;
+      }
       if (satProduct === 'composite') {
         setLegendTitle('COMPOSITE · ОТРАЖАЕМОСТЬ dBZ');
         /* шкала dBZ — стандартная палитра радара (цвета источника близки к ней) */
@@ -2476,7 +2576,36 @@
       (st[3] ? '<br>Задержка публикации: ' + st[3].toFixed(1) + ' с' : '') + '<br>Источник: Blitzortung</div>' + closeBtn;
     placePopup(mx, my);
   }
-  map.on('click', function(e) { if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint; var stLtg = ltgFindNear(p.x, p.y); if (stLtg) { ltgShowPopup(stLtg, p.x, p.y); return; } /* молнии кликабельны поверх ЛЮБОГО слоя, включая спутник */ if (S.layer === 'sat') return; var ll = crosshairMode ? map.containerPointToLatLng(L.point(p.x, p.y)) : e.latlng; if (S.layer === 'dop') { dopShowPopup(ll, p.x, p.y); return; } /* доплер: скорость в точке */ if (S.layer === 'wx' && radarNcActive()) { /* БЛОК A: тип явления в точке — через GetFeatureInfo */ wxNcShowPopup(ll, p.x, p.y); return; } var block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
+  /* ─── Клик по «Высоте ВГО»: высота в точке через GetFeatureInfo.
+     Формула конвертации — из скрипта источника: код 1 → нет эха, иначе (код−2)/10 км. ─── */
+  function heightShowPopup(latlng, mx, my) {
+    var seq = ++wxNcGfiSeq;
+    var t = new Date(S.ts * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+    var closeBtn = '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+    popupEl.innerHTML = '<div class="popup-header"><div class="popup-label">⏳ Запрос высоты…</div></div>' +
+      '<div class="popup-meta">Высота ВГО · 4x4 (BUFR) · кадр ' + t + ' МСК</div>' + closeBtn;
+    placePopup(mx, my);
+    var live = S.ts >= nowTs();
+    var time = live ? null : satIso(S.ts);
+    var sts = [{ id: 'bufr_height', label: 'Москва' }, { id: 'bufr_novosib_height', label: 'Новосибирск' }, { id: 'bufr_vlad_height', label: 'Владивосток' }];
+    Promise.all(sts.map(function(st) { return wxNcQueryStation(st, latlng, time); })).then(function(res) {
+      if (seq !== wxNcGfiSeq || !popupVisible) return;
+      var best = null;
+      res.forEach(function(r) { if (r.code !== null && r.code !== 255 && (best === null || r.code > best.code)) best = r; });
+      var lbl, meta, color;
+      if (!best) { lbl = 'Вне зоны покрытия BUFR'; color = 'rgba(128,128,128,0.35)'; meta = 'Станции: Москва · Новосибирск · Владивосток<br>Кадр: ' + t + ' МСК'; }
+      else if (best.code <= 1) { lbl = 'Нет эха'; color = 'rgba(128,128,128,0.35)'; meta = 'Слой: <b>Высота ВГО</b> (4x4)<br>Станция: ' + escHtml(best.st.label) + '<br>Кадр: ' + t + ' МСК'; }
+      else {
+        var km = (best.code - 2) / 10;
+        lbl = km.toFixed(1) + ' км';
+        color = '#5b8def';
+        meta = 'Слой: <b>Высота ВГО</b> (4x4, BUFR)<br>Станция: ' + escHtml(best.st.label) + '<br>Код пикселя: ' + best.code + '<br>Кадр: ' + t + ' МСК';
+      }
+      popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + color + '"></div><div class="popup-label">' + escHtml(lbl) + '</div></div>' +
+        '<div class="popup-meta">' + meta + '</div>' + closeBtn;
+    });
+  }
+  map.on('click', function(e) { if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint; var stLtg = ltgFindNear(p.x, p.y); if (stLtg) { ltgShowPopup(stLtg, p.x, p.y); return; } /* молнии кликабельны поверх ЛЮБОГО слоя, включая спутник */ var ll = crosshairMode ? map.containerPointToLatLng(L.point(p.x, p.y)) : e.latlng; if (S.layer === 'sat' && satProduct === 'height') { heightShowPopup(ll, p.x, p.y); return; } /* высота ВГО в точке */ if (S.layer === 'sat') return; if (S.layer === 'dop') { dopShowPopup(ll, p.x, p.y); return; } /* доплер: скорость в точке */ if (S.layer === 'wx' && radarNcActive()) { /* БЛОК A: тип явления в точке — через GetFeatureInfo */ wxNcShowPopup(ll, p.x, p.y); return; } var block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
 
   var modal = $('palette-modal'), modalClose = $('modal-close'), modalTabs = document.querySelectorAll('.modal-tabs button'), paletteListContainer = $('palette-list-container'), loadPaletteBtn = $('load-palette-btn'), fileInput = $('file-input'), createPaletteBtn = $('create-palette-btn'), deletePaletteBtn = $('delete-palette-btn'), exportPaletteBtn = $('export-palette-btn'), createForm = $('create-form'), newPalName = $('new-pal-name'), entryVal = $('entry-val'), entryColor = $('entry-color'), entryLabel = $('entry-label'), addEntryBtn = $('add-entry-btn'), entriesList = $('entries-list'), savePaletteBtn = $('save-palette-btn'), cancelCreateBtn = $('cancel-create-btn');
   var currentLayerForModal = 'radar'; var tempEntries = []; var editingIndex = -1; var editingEntryIndex = -1;
@@ -2741,6 +2870,11 @@
   function collectLegendData() {
     /* Грозовые продукты — своя легенда в экспорт-композите */
     if (S.layer === 'sat' && satProduct) {
+      if (satProduct === 'height') {
+        return { title: 'ВЫСОТА ВГО · BUFR (ДМРЛ)', grad: null, gradCaps: null,
+          rows: [['#5b8def', 'Высота ВГО, км — палитра источника 4x4']],
+          notes: ['Станции: Москва/Новосибирск/Владивосток · шаг 10 мин'] };
+      }
       if (satProduct === 'composite') {
         return { title: 'COMPOSITE · ОТРАЖАЕМОСТЬ dBZ', grad: null, gradCaps: null,
           rows: BUILTIN_RADAR.map(function(e2) { return ['rgb(' + e2.r.join(',') + ')', e2.l]; }),
@@ -2982,7 +3116,9 @@
       sat_channel: S.layer === 'sat' && !satProduct ? SAT_CHANNELS[satChIdx].id : undefined,
       product: S.layer === 'sat' && satProduct ? satProduct : undefined,
       product_source: S.layer === 'sat' && satProduct
-        ? (satProduct === 'composite' ? '4x4 (' + COMPOSITE_REGIONS[compositeRegionIdx].id + ')' : 'Open-Meteo (модель, час ' + ((prodGrid.times && prodGrid.times[prodGrid.hourIdx]) || '—') + ' UTC)')
+        ? (satProduct === 'composite' ? '4x4 (' + COMPOSITE_REGIONS[compositeRegionIdx].id + ')'
+          : (satProduct === 'height' ? '4x4 (ДМРЛ BUFR — высота ВГО)'
+            : 'Open-Meteo (модель, час ' + ((prodGrid.times && prodGrid.times[prodGrid.hourIdx]) || '—') + ' UTC)'))
         : undefined,
       composite: isComposite ? true : undefined,
       basemap_theme: isComposite ? currentTheme : undefined,
