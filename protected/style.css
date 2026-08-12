@@ -679,3 +679,10 @@ body.light-theme #time-tooltip::after { border-top-color: rgba(255, 255, 255, 0.
    переопределяется) + чёрный текст (--text-dim) = нечитаемо в светлой теме */
 body.light-theme .leaflet-control-scale-line, body.light-theme .leaflet-control-scale { background: rgba(255, 255, 255, 0.6) !important; border-color: rgba(0, 0, 0, 0.15) !important; color: #1a1a1a !important; }
 
+/* ─── Грозовые продукты (раздел «Спутник») ─── */
+/* Канвас сетки CAPE/CIN/SCP: поверх тайлов, под панелями; клики проходят на карту */
+#prod-canvas { position: fixed; inset: 0; z-index: 350; pointer-events: none; display: none; }
+/* Разделитель «Грозовые продукты» в дропдауне каналов */
+.dd-sep { padding: 6px 12px 2px; font-size: 9px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-dim); text-align: center; cursor: default; user-select: none; }
+body.light-theme .dd-sep { color: rgba(0, 0, 0, 0.45); }
+
