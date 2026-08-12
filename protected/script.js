@@ -39,6 +39,23 @@
   };
 
   var SRC = 'https://rainradar.ru/composite', FZ = 5, MDBZ = 5, DELAY = 600, STEP = 600;
+
+  /* ═══ Источник радара dBZ: 'nowcast' (ДМРЛ, основной) | 'rainradar' (запасной).
+     Отдельный localStorage-ключ radarSource (mapView не трогаем).
+     nowcast-тайлы приходят УЖЕ ЦВЕТНЫМИ в палитре, совпадающей с BUILTIN_RADAR
+     (проверено по пикселям) → показываем как есть; кастомные палитры пользователя —
+     реколоризация через procQueue (обратное сопоставление цвет→dBZ). ═══ */
+  var radarSource = 'nowcast';
+  try { var rsv = localStorage.getItem('radarSource'); if (rsv === 'rainradar' || rsv === 'nowcast') radarSource = rsv; } catch (e) {}
+  var radarSourceAuto = false; /* true = на rainradar ушли АВТОМАТИЧЕСКИ (из-за ошибок) */
+  /* Данные nowcast для отражаемости: ДМРЛ-станции РФ либо композит FMI (Европа).
+     Переключатель в легенде: покрытие у них разное, пусть выбирает пользователь. */
+  var RADAR_NC_LAYERS = [
+    { id: 'bufr_dbz1', label: 'ДМРЛ РФ (1 км)' },
+    { id: 'fmi_open_composite_dbz', label: 'FMI композит (Европа)' }
+  ];
+  var radarNcIdx = 0;
+  try { var rnl = localStorage.getItem('radarNcLayer'); var rni = RADAR_NC_LAYERS.findIndex(function(l) { return l.id === rnl; }); if (rni >= 0) radarNcIdx = rni; } catch (e) {}
   var HISTORY_MINUTES = 190, MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
   var BASE_RES_KM = 2;
 
@@ -639,7 +656,7 @@
   }
 
   /* ─── Crossfade канваса радара при переключении radar↔sat (вместо резкого display) ─── */
-  function canvasShouldHide() { return (S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible; }
+  function canvasShouldHide() { return (S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible || radarNcActive(); }
   function fadeCanvas(show) {
     var target = parseInt($('opacity-slider').value) / 100;
     if (REDUCE_MOTION) { canvas.style.display = show ? 'block' : 'none'; canvas.style.opacity = target; return; }
@@ -670,6 +687,7 @@
     if (S.layer === 'sat') { toast('В режиме спутника слой dBZ не отображается'); return; }
     S.dbzVisible = !S.dbzVisible;
     fadeCanvas(S.dbzVisible); /* плавное затухание/проявление 250–300мс, reduced-motion — мгновенно */
+    if (radarNcLayer) radarNcLayer.setOpacity(S.dbzVisible ? (parseInt($('opacity-slider').value) || 100) / 100 : 0); /* WMS-режим */
     applyDbzUI();
     if (S.dbzVisible) schedRender(); else { hidePopup(); hoverEl.style.display = 'none'; }
     saveViewDebounced();
@@ -769,6 +787,12 @@
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     if (S.layer === 'sat') { satUpdateChip(); return; }
     if (S.layer === 'dmrl') { setChip('📡 ДМРЛ · ' + (window.DMRL_SITES ? DMRL_SITES.length : 0) + ' станций РФ/РБ' + ltgChipSuffix()); return; }
+    if (radarNcActive()) { /* dBZ с nowcast: рисует WMS-слой, канвас пуст */
+      var liveNc = S.ts >= nowTs();
+      var tNc = new Date((liveNc ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+      setChip('dBZ · nowcast (' + RADAR_NC_LAYERS[radarNcIdx].label + ') · ' + tNc + ' МСК' + (liveNc ? ' (LIVE)' : '') + (radarNcLoading ? ' · ⏳' : '') + (radarNcErr ? ' · ⚠️ ' + radarNcErr : '') + (!S.dbzVisible ? ' · слой скрыт' : '') + dmrlChipSuffix() + ltgChipSuffix());
+      return;
+    }
     if (S.layer === 'dop') { dopUpdateChip(); return; }
     /* Слой скрыт кнопкой-«глазом»: не тратим CPU на отрисовку */
     if (!S.dbzVisible) { setChip((S.layer === 'radar' ? 'dBZ' : 'ОЯ') + ' · слой скрыт'); return; }
@@ -786,7 +810,7 @@
     /* Статус-чип: слой · время кадра МСК · загрузка */
     var lname = S.layer === 'radar' ? 'dBZ' : 'ОЯ';
     var tstr = new Date(S.ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-    setChip(lname + ' · ' + tstr + ' МСК' + (miss > 0 ? ' · ⏳' + miss : '') + dmrlChipSuffix() + ltgChipSuffix());
+    setChip(lname + (S.layer === 'radar' ? ' · rainradar' : '') + ' · ' + tstr + ' МСК' + (miss > 0 ? ' · ⏳' + miss : '') + dmrlChipSuffix() + ltgChipSuffix());
     if (S.layer === 'wx') { ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.beginPath(); for (var gi = 0; gi < tiles.length; gi++) { var gt = tiles[gi], gr = tileRect(gt.x, gt.y); if (gr.sw <= 0 || gr.sh <= 0) continue; var scX = gr.sw / 256, scY = gr.sh / 256, bW = S.px * scX, bH = S.px * scY; if (bW < 1 || bH < 1) continue; var cols = Math.ceil(256 / S.px); for (var ci = 0; ci <= cols; ci++) { var lx = gr.sx + Math.round(ci * bW) + 0.5; ctx.moveTo(lx, gr.sy); ctx.lineTo(lx, gr.sy + gr.sh); } for (var ri = 0; ri <= cols; ri++) { var ly = gr.sy + Math.round(ri * bH) + 0.5; ctx.moveTo(gr.sx, ly); ctx.lineTo(gr.sx + gr.sw, ly); } } ctx.stroke(); ctx.restore(); }
   }
 
@@ -1284,8 +1308,163 @@
   map.on('moveend zoomend', dopOnMoveEnd);
   map.on('move', drawDop);
   resizeDopCanvas();
+
+  /* ═══ БЛОК A: радар dBZ с nowcast.ru (основной источник) ═══
+     Слой — тот же переиспользуемый SatWMS через /api/nowcastProxy (пул ≤6,
+     LRU-кэш по полному URL: имя слоя (bufr_dbz1 или fmi) + TIME → ключи не
+     пересекаются ни со спутником, ни с доплером). Канвас #radar здесь не используется. */
+  var radarNcLayer = null, radarNcOld = null, radarNcSwapTmr = null;
+  var radarNcLoading = false, radarNcErr = null, radarNcFails = 0;
+  function radarNcActive() { return S.layer === 'radar' && radarSource === 'nowcast'; }
+  function createRadarNcLayer(ts) {
+    var params = {
+      layers: RADAR_NC_LAYERS[radarNcIdx].id,
+      format: 'image/png',
+      transparent: true,
+      version: '1.1.1',
+      crs: L.CRS.EPSG4326,   /* проверенная комбинация nowcast (как у доплера) */
+      tileSize: 256,
+      zIndex: 11,
+      maxZoom: 10,
+      updateWhenIdle: false,
+      keepBuffer: 2,
+      /* прозрачность — из слайдера; скрытый dBZ (👁) = opacity 0 */
+      opacity: S.dbzVisible ? (parseInt($('opacity-slider').value) || 100) / 100 : 0
+    };
+    if (ts) params.time = satIso(ts); /* LIVE — без TIME */
+    return new SatWMS('/api/nowcastProxy', params);
+  }
+
+  /* Реколоризация под кастомную палитру: nowcast-цвета совпадают с BUILTIN_RADAR →
+     обратное сопоставление цвет→dBZ (nearest, как findPalEntry), затем пороги
+     активной палитры. Стандартная палитра — тайлы как есть, без работы. */
+  var radarRecolorCache = new Map(), RADAR_RECOLOR_MAX = 150;
+  function radarPalIsDefault() { return palettes.radar.activeIdx === 0; }
+  function recolorRadarNcTile(tile) {
+    if (radarPalIsDefault()) return;
+    var pal = palettes.radar.list[palettes.radar.activeIdx];
+    if (!pal || !pal.items || !pal.items.length) return;
+    var key = tile._satUrl + '\u00a7rad\u00a7' + satPalSignature(pal);
+    var hit = radarRecolorCache.get(key);
+    if (hit) { enqueueTile({ run: function() { if (!tile._satAborted) { tile._recolored = true; tile.src = hit; } } }); return; }
+    var items = pal.items;
+    enqueueTile({ run: function() {
+      try {
+        if (tile._satAborted) return;
+        var c = document.createElement('canvas'); c.width = c.height = 256;
+        var cc = c.getContext('2d');
+        cc.drawImage(tile, 0, 0, 256, 256);
+        var idd = cc.getImageData(0, 0, 256, 256), d = idd.data;
+        for (var i = 0; i < d.length; i += 4) {
+          if (!d[i + 3]) continue;
+          /* цвет → dBZ по таблице BUILTIN_RADAR (nearest, порог расстояния) */
+          var best = -1, bd = 1e9;
+          for (var j = 0; j < BUILTIN_RADAR.length; j++) {
+            var e = BUILTIN_RADAR[j];
+            var dr = d[i] - e.r[0], dg = d[i + 1] - e.r[1], db = d[i + 2] - e.r[2];
+            var dist = dr * dr + dg * dg + db * db;
+            if (dist < bd) { bd = dist; best = j; }
+          }
+          if (best < 0 || bd > 4000) continue; /* чужой цвет (подписи и т.п.) — не трогаем */
+          var v = BUILTIN_RADAR[best].v, col = null;
+          for (var k = 0; k < items.length; k++) { if (v >= items[k].v) { col = items[k].r; break; } }
+          if (col) { d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; }
+          else { d[i + 3] = 0; } /* ниже минимального порога палитры — прозрачно */
+        }
+        cc.putImageData(idd, 0, 0);
+        var du = c.toDataURL();
+        if (radarRecolorCache.size >= RADAR_RECOLOR_MAX) radarRecolorCache.delete(radarRecolorCache.keys().next().value);
+        radarRecolorCache.set(key, du);
+        tile._recolored = true;
+        tile.src = du;
+      } catch (err) { /* tainted невозможен (свой домен), но страхуемся */ }
+    } });
+  }
+
+  function attachRadarNcEvents(lyr) {
+    lyr.on('loading', function() { if (lyr === radarNcLayer) { radarNcLoading = true; $('pulse').classList.add('busy'); schedRender(); } });
+    lyr.on('load', function() { if (lyr === radarNcLayer) { radarNcLoading = false; radarNcFails = 0; radarNcErr = null; $('pulse').classList.remove('busy'); schedRender(); } });
+    lyr.on('tileload', function(e) { if (lyr === radarNcLayer && !e.tile._recolored) recolorRadarNcTile(e.tile); });
+    lyr.on('tileerror', function() {
+      if (lyr !== radarNcLayer) return;
+      radarNcFails++;
+      if (radarNcFails >= 6 && radarSource === 'nowcast') {
+        /* БЛОК B: авто-fallback на rainradar. Авто-возврата НЕТ — периодические
+           пробные запросы дёргали бы полуживой сервер и мигали слоем;
+           возврат — вручную кнопкой «Источник» в легенде. */
+        toast('⚠️ ДМРЛ/nowcast недоступен — переключаюсь на rainradar');
+        setRadarSource('rainradar', true);
+      } else if (radarNcFails >= 3) {
+        radarNcErr = 'ошибки тайлов'; radarNcLoading = false; $('pulse').classList.remove('busy'); schedRender();
+      }
+    });
+  }
+  /* Смена кадра/данных: новый слой поверх, старый после загрузки (единый паттерн проекта) */
+  function radarNcApply(immediate) {
+    if (!radarNcActive()) return;
+    clearTimeout(radarNcSwapTmr);
+    radarNcSwapTmr = setTimeout(function() {
+      if (!radarNcActive()) return;
+      var live = S.ts >= nowTs();
+      var old = radarNcLayer;
+      if (radarNcOld && map.hasLayer(radarNcOld)) { map.removeLayer(radarNcOld); radarNcOld = null; }
+      var lyr = createRadarNcLayer(live ? null : S.ts);
+      attachRadarNcEvents(lyr);
+      lyr.addTo(map);
+      radarNcLayer = lyr;
+      if (old) {
+        radarNcOld = old;
+        var rm = function() { if (radarNcOld === old && map.hasLayer(old)) { map.removeLayer(old); radarNcOld = null; } };
+        lyr.once('load', rm);
+        setTimeout(rm, 5000);
+      }
+      schedRender();
+    }, immediate ? 0 : 180);
+  }
+  function radarNcRemove() {
+    clearTimeout(radarNcSwapTmr);
+    if (radarNcLayer) { if (map.hasLayer(radarNcLayer)) map.removeLayer(radarNcLayer); radarNcLayer = null; }
+    if (radarNcOld) { if (map.hasLayer(radarNcOld)) map.removeLayer(radarNcOld); radarNcOld = null; }
+    radarNcLoading = false; radarNcErr = null; radarNcFails = 0;
+  }
+  function setRadarSource(src, auto) {
+    radarSource = src;
+    radarSourceAuto = !!auto && src === 'rainradar';
+    try { localStorage.setItem('radarSource', src); } catch (e) {}
+    if (S.layer !== 'radar') { buildLegend(); return; }
+    if (src === 'nowcast') {
+      radarNcFails = 0; radarNcErr = null;
+      fadeCanvas(false); /* канвас не нужен — рисует WMS-слой */
+      radarNcApply(true);
+      if (!auto) toast('Радар: nowcast.ru (ДМРЛ)');
+    } else {
+      radarNcRemove();
+      fadeCanvas(true); /* обратно на канвас rainradar */
+      S.cache.clear(); S.pending.clear(); S.failed.clear();
+      schedRender();
+      if (!auto) toast('Радар: rainradar.ru');
+    }
+    buildLegend(); schedRender();
+  }
+  function setRadarNcData(idx) {
+    if (idx < 0 || idx >= RADAR_NC_LAYERS.length || idx === radarNcIdx) return;
+    radarNcIdx = idx;
+    try { localStorage.setItem('radarNcLayer', RADAR_NC_LAYERS[idx].id); } catch (e) {}
+    if (radarNcActive()) radarNcApply(true);
+    buildLegend();
+    toast('Данные: ' + RADAR_NC_LAYERS[idx].label);
+  }
+  /* Возврат на вкладку: LIVE-кадр мог устареть — обновляем сразу */
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && radarNcActive() && !S.playing && !S.manualTime) {
+      var n = nowTs();
+      if (n !== S.ts) { S.ts = n; updHUD(); }
+      radarNcApply(true);
+    }
+  });
   function forceRefresh() {
     if (S.layer === 'sat') { satRecolorCache.clear(); satApplyTime(true); return; } /* смена палитры спутника → перекрасить тайлы */
+    if (radarNcActive()) { radarRecolorCache.clear(); radarNcApply(true); return; } /* nowcast-радар: пересоздать слой (палитра/кадр) */
     S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender();
   }
   /* Вращение иконки ↻ — видимый статус обновления */
@@ -1353,7 +1532,7 @@
       S.frameI = (S.frameI + 1) % S.frames.length;
       startFrameFade(); /* crossfade между кадрами (для sat — no-op) */
       S.ts = S.frames[S.frameI];
-      if (S.layer === 'sat') { satApplyTime(); } else if (S.layer === 'dop') { nowcastApplyTime(); } else { S.failed.clear(); schedRender(); }
+      if (S.layer === 'sat') { satApplyTime(); } else if (S.layer === 'dop') { nowcastApplyTime(); } else if (radarNcActive()) { radarNcApply(); } else { S.failed.clear(); schedRender(); }
       updHUD();
     }, animMs());
     S.playing = true; $('playbtn').innerHTML = '&#x25A0;'; retrig($('playbtn'), 'pop');
@@ -1382,6 +1561,7 @@
     S.dbzVisible = true;
     /* Уборка спец-слоёв (ДМРЛ/доплер) — идемпотентно при любом переходе */
     dopStop(); /* доплер-режим всегда сворачиваем; ДМРЛ синхронизируем ниже (оверлей 📡 может остаться) */
+    radarNcRemove(); /* nowcast-радар пересоздадим ниже, если возвращаемся на radar */
     /* Таймлайн возвращаем, если пользователь не скрывал его сам (спец-слои его прячут) */
     if (S.layer !== 'dmrl' && S.layer !== 'dop' && !hiddenPanels['tl']) $('tl').style.display = 'flex';
     if (S.layer === 'dmrl' || S.layer === 'dop') {
@@ -1449,7 +1629,9 @@
       S.manualTime = false; S.ts = nowTs();
       S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
       S.cache.clear(); S.pending.clear(); S.failed.clear();
-      buildFrames(); forceRefresh();
+      buildFrames();
+      if (radarNcActive()) { fadeCanvas(false); radarNcApply(true); } /* dBZ с nowcast: канвас не нужен */
+      else forceRefresh();
     }
     dmrlSync();
     applyDbzUI();
@@ -1492,10 +1674,10 @@
   }
   initChannelUI();
 
-  function cyclePx() { if (S.layer === 'sat') return; S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); saveViewDebounced(); }
+  function cyclePx() { if (S.layer === 'sat') return; if (radarNcActive()) { toast('Разрешение настраивается в режиме rainradar (источник — в легенде)'); return; } S.pxIndex = (S.pxIndex + 1) % S.pxLevels.length; S.px = S.pxLevels[S.pxIndex]; updatePxLabel(); S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); var resKm = (S.px * BASE_RES_KM).toFixed(1); toast('Разрешение: ' + resKm + ' км/пиксель'); schedRender(); saveViewDebounced(); }
   function updatePxLabel() { var resKm = (S.px * BASE_RES_KM); var label = resKm.toFixed(1) + ' км'; if (resKm === 1) label = '1x1 км'; if (resKm === 2) label = '2x2 км'; if (resKm === 4) label = '4x4 км'; if (resKm === 8) label = '8x8 км'; $('pxbtn').textContent = label; }
   /* Текст кнопок не меняем на «✓» — активность показывает состояние .on (без прыжков ширины) */
-  function toggleSmooth() { if (S.layer === 'sat') return; S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); ctrl.classList.add('active'); } else { btn.classList.remove('on'); ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); saveViewDebounced(); }
+  function toggleSmooth() { if (S.layer === 'sat') return; if (radarNcActive()) { toast('Сглаживание доступно в режиме rainradar (источник — в легенде)'); return; } S.smooth = !S.smooth; var btn = $('btn-smooth'); var ctrl = $('smooth-control'); if (S.smooth) { btn.classList.add('on'); ctrl.classList.add('active'); } else { btn.classList.remove('on'); ctrl.classList.remove('active'); } S.cache.clear(); S.pending.clear(); S.failed.clear(); forceRefresh(); toast(S.smooth ? 'Сглаживание включено (сила ' + S.smoothStrength + ')' : 'Сглаживание выключено'); saveViewDebounced(); }
 
   function toggleRuler() { S.ruler.active = !S.ruler.active; var btn = $('btn-ruler'); if (S.ruler.active) { btn.classList.add('on'); toast('Клик — точка, двойной клик — завершить.'); map.on('click', rulerClick); map.on('dblclick', rulerFinish); if (crosshairMode) toggleCrosshair(); } else { btn.classList.remove('on'); map.off('click', rulerClick); map.off('dblclick', rulerFinish); clearRuler(); } }
   function rulerClick(e) { if (!S.ruler.active) return; var latlng = e.latlng; S.ruler.points.push(latlng); var marker = L.circleMarker(latlng, { radius: 5, color: '#5b8def', fillColor: '#fff', fillOpacity: 1, weight: 2, className: 'ruler-marker' }).addTo(map); S.ruler.markers.push(marker); updateRulerLine(); updateRulerLabels(); }
@@ -1655,7 +1837,28 @@
       return;
     }
     var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; setLegendTitle(title); 
+    var isRadarLegend = S.layer === 'radar';
     items.forEach(function(p, i) { var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14)); var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
+    if (isRadarLegend) {
+      /* Переключатель источника радара: nowcast (ДМРЛ, основной) ↔ rainradar (запасной) */
+      var srcBtn = document.createElement('button');
+      srcBtn.className = 'btn mini-btn' + (radarSource === 'nowcast' ? ' on' : '');
+      srcBtn.textContent = 'Источник: ' + (radarSource === 'nowcast' ? 'nowcast (ДМРЛ)' : 'rainradar');
+      srcBtn.addEventListener('click', function() { setRadarSource(radarSource === 'nowcast' ? 'rainradar' : 'nowcast', false); });
+      el.appendChild(srcBtn);
+      if (radarSource === 'nowcast') {
+        /* Выбор данных nowcast: станции ДМРЛ РФ или композит FMI (Европа) */
+        var dataBtn = document.createElement('button');
+        dataBtn.className = 'btn mini-btn';
+        dataBtn.textContent = 'Данные: ' + RADAR_NC_LAYERS[radarNcIdx].label;
+        dataBtn.addEventListener('click', function() { setRadarNcData((radarNcIdx + 1) % RADAR_NC_LAYERS.length); });
+        el.appendChild(dataBtn);
+        var ncNote = document.createElement('div'); ncNote.className = 'li legend-note';
+        ncNote.textContent = 'ДМРЛ-покрытие: Москва/Новосибирск/Владивосток; попап и CSV — в режиме rainradar';
+        el.appendChild(ncNote);
+        if (radarSourceAuto) { var an = document.createElement('div'); an.className = 'li legend-note'; an.textContent = 'Был авто-переход на rainradar — вернитесь кнопкой выше'; el.appendChild(an); }
+      }
+    }
     appendDmrlLegend(el);
     appendLtgLegend(el);
   }
@@ -1691,6 +1894,11 @@
     if (n !== S.ts) {
       S.ts = n; updHUD();
       if (S.layer === 'sat') { satApplyTime(true); buildFrames(); toast('Новый снимок спутника'); }
+      else if (radarNcActive()) {
+        /* БЛОК C: постоянная передача nowcast — новый кадр раз в ~10 мин, без тоста
+           (чип покажет время сам); при скрытой вкладке не дёргаем сеть */
+        if (document.visibilityState !== 'hidden') { radarNcApply(true); buildFrames(); }
+      }
       else { forceRefresh(); toast('Новые данные'); }
     }
     buildFrames();
@@ -1702,7 +1910,7 @@
   function findPalEntry(r, g, b) { var items = getCurrentPaletteItems(), best = null, bd = 1e9; for (var i = 0; i < items.length; i++) { var p = items[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2], d = dr * dr + dg * dg + db * db; if (d < bd) { bd = d; best = p; } } return bd < 3000 ? { label: best.l, v: best.v } : null; }
   
   function getBlockAt(mx, my) { 
-    if ((S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible) return null; /* данные пикселей есть только у радара/ОЯ */
+    if ((S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible || radarNcActive()) return null; /* пиксельные данные — только у канвасных слоёв (rainradar) */
     var tiles = visTiles(); 
     for (var i = 0; i < tiles.length; i++) { 
       var t = tiles[i], r = tileRect(t.x, t.y); 
@@ -1802,6 +2010,7 @@
         satUpdateChip();
       } else {
         canvas.style.opacity = val / 100;
+        if (radarNcLayer && S.dbzVisible) radarNcLayer.setOpacity(val / 100); /* WMS-радар nowcast */
       }
       opacityVal.textContent = val + '%';
       retrig(opacityVal, 'bump'); /* лёгкий отклик значения */
@@ -2028,6 +2237,7 @@
     }
     var items = getCurrentPaletteItems();
     var o = { title: S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ', grad: null, gradCaps: null, rows: [], notes: [] };
+    if (S.layer === 'radar') o.notes.push(radarNcActive() ? 'Источник: nowcast.ru (ДМРЛ)' : 'Источник: rainradar.ru');
     items.forEach(function(p) { o.rows.push(['rgb(' + p.r.join(',') + ')', p.l]); });
     try { var pl = palettes[S.layer]; var pn = pl.list[pl.activeIdx].name; if (pn) o.notes.push('Палитра: ' + pn); } catch (e) {}
     return o;
@@ -2158,6 +2368,13 @@
       } else {
         drawDopToCtx(octx);  /* модельные стрелки ветра */
       }
+    } else if (radarNcActive()) {
+      /* dBZ с nowcast: WMS-тайлы в пиксели (прозрачность слоя уже включает слайдер) */
+      if (S.dbzVisible && radarNcLayer) {
+        octx.save(); octx.globalAlpha = (parseInt($('opacity-slider').value) || 100) / 100;
+        drawTileLayerTo(octx, radarNcLayer);
+        octx.restore();
+      }
     } else {
       var rc = renderRadarToCanvas();
       octx.save(); octx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2205,6 +2422,7 @@
       dmrl: (S.layer === 'dmrl' || dmrlOverlayOn) ? true : undefined,
       dmrl_range_km: (S.layer === 'dmrl' || dmrlOverlayOn) ? DMRL_RANGE_KM : undefined,
       doppler: S.layer === 'dop' ? true : undefined,
+      radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? 'nowcast.ru (' + RADAR_NC_LAYERS[radarNcIdx].id + ')' : 'rainradar.ru') : undefined,
       doppler_source: S.layer === 'dop' ? (dopSource === 'nowcast' ? 'nowcast.ru — радиальная скорость ДМРЛ (' + DOP_HEIGHTS[dopHeightIdx].label + ')' : 'Open-Meteo wind_speed_10m (модель, не радиодоплер)') : undefined,
       legend_pos: isComposite ? LEGEND_POS : undefined,
       sat_backdrop: isComposite && satBackdropActive() ? 'dark_all под спутником' : undefined,
@@ -2276,6 +2494,7 @@
   function doExport(fmt) {
     if ((S.layer === 'dmrl' || S.layer === 'dop') && fmt !== 'map' && fmt !== 'mapgeo') { toast('Для этого слоя доступен экспорт «Карта + слой»'); return; }
     if (fmt === 'csv' && S.layer === 'sat') { toast('CSV доступен только для радара/явлений'); return; }
+    if (fmt === 'csv' && radarNcActive()) { toast('CSV с сырыми dBZ доступен в режиме rainradar (переключите источник в легенде)'); return; }
     if (S.layer !== 'sat' && !S.dbzVisible) { toast('Слой скрыт — включите 👁 для экспорта'); return; }
     var btn = $('btn-download');
     btn.classList.add('busy-export');
@@ -2306,7 +2525,7 @@
           } finally { finish(); }
         }, 30);
       };
-      if (S.layer === 'radar' || S.layer === 'wx') { waitForTiles(function() { run(); }); } else { run(); } /* спец-слоям радар-тайлы не нужны */
+      if ((S.layer === 'radar' || S.layer === 'wx') && !radarNcActive()) { waitForTiles(function() { run(); }); } else { run(); } /* WMS-слоям канвас-тайлы не нужны */
       return;
     }
 
@@ -2334,6 +2553,29 @@
 
     if (fmt === 'csv') { exportCSV(base, finish); return; }
 
+    if (radarNcActive()) { /* слой-PNG из WMS-тайлов nowcast */
+      setTimeout(function() {
+        try {
+          var W = Math.round(innerWidth * DPR), H = Math.round(innerHeight * DPR);
+          var oc = document.createElement('canvas'); oc.width = W; oc.height = H;
+          var octx2 = oc.getContext('2d'); octx2.setTransform(DPR, 0, 0, DPR, 0, 0);
+          var drawn = drawTileLayerTo(octx2, radarNcLayer);
+          if (!drawn) { toast('Тайлы nowcast ещё не загружены'); return; }
+          var rcN = { canvas: oc, missing: 0, total: drawn, w: W, h: H };
+          var duN = oc.toDataURL('image/png');
+          if (fmt === 'png') { downloadBlob(new Blob([dataUrlToU8(duN)], { type: 'image/png' }), base + '.png'); }
+          else {
+            var filesN = [
+              { name: base + '.png', data: dataUrlToU8(duN) },
+              { name: base + '.pgw', data: new TextEncoder().encode(makeWorldFile(rcN.w, rcN.h)) },
+              { name: base + '.json', data: new TextEncoder().encode(JSON.stringify(exportMeta(rcN), null, 2)) }
+            ];
+            downloadBlob(makeZip(filesN), base + '.zip');
+          }
+        } finally { finish(); }
+      }, 30);
+      return;
+    }
     toast('⏳ Подготовка экспорта…');
     waitForTiles(function(missing) {
       setTimeout(function() { /* отпускаем кадр — рендерим вне обработчика клика */
@@ -2472,6 +2714,10 @@
   try { localStorage.removeItem('calibration'); } catch (e) {} /* калибровка удалена — чистим старый ключ */
   applyAnimPref(); updateAnimBtn();
   loadPalettesFromStorage(); applyTheme('dark', false); restoreView(); buildLegend(); buildFrames(); updHUD(); updatePxLabel(); applyDbzUI(); schedRender();
+  /* Радар — дефолтный слой: в режиме nowcast WMS-слой создаём сразу (канвас скрыт).
+     Отдельный прогрев (как у спутника) не нужен: радар и есть стартовый слой,
+     его LIVE-кадр попадает в LRU-кэш SatWMS при первом же показе. */
+  if (radarNcActive()) { canvas.style.display = 'none'; radarNcApply(true); }
   /* После restoreView (и при первом заходе без сохранений): актуальный зум в чипе
      и повторный invalidateSize — на мобильных вьюпорт меняется из-за URL-бара */
   updZoomChip(false);
