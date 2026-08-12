@@ -97,6 +97,33 @@
   WX_NC_CODES[255] = 'нет информации';
   /* Числовые RGB палитры ОЯ — для указателя/прицела (сопоставление цвета пикселя тайла) */
   var WX_NC_RGB = WX_NC_PALETTE.map(function(p) { var m = p[1].match(/\d+/g); return [+m[0], +m[1], +m[2]]; });
+  /* ─── Палитра доплера bufr_vel*: [R,G,B, скорость м/с|null, подпись].
+     Цвета сняты с GetLegendGraphic bufr_vel1 (20 плашек); 9 из них откалиброваны
+     живым GetFeatureInfo (value → v = 63.5·(−1+(value−1)·2/254)), остальные —
+     интерполяция по порядку легенды. Таблица ОЦЕНОЧНАЯ (шаг плашки ~3–5 м/с),
+     точное значение в точке даёт клик (GetFeatureInfo). null = нет эха. ─── */
+  var DOP_NC_RGB = [
+    [202, 202, 202, null, 'нет эха (зона обзора)'],
+    [84,  178, 205, -40, '≈−40 м/с (к радару)'],
+    [69,  133, 156, -30, '≈−30 м/с (к радару)'],
+    [32,  79,  31,  -24, '≈−24 м/с (к радару)'],
+    [52,  125, 31,  -19, '≈−19 м/с (к радару)'],
+    [0,   178, 0,   -15, '≈−15 м/с (к радару)'],
+    [49,  215, 49,  -11, '≈−11 м/с (к радару)'],   /* калибровано: −11.0 */
+    [78,  246, 72,  -8,  '≈−8 м/с (к радару)'],    /* калибровано: −8.0 */
+    [153, 200, 169, -2,  '≈−2 м/с (к радару)'],    /* калибровано: −1.0 */
+    [185, 250, 216, -0.5, '≈−0.5 м/с (слабо к радару)'],
+    [253, 253, 253, 0,   '~0 м/с (поперёк луча)'],
+    [252, 0,   252, 1,   '≈+1 м/с (от радара)'],   /* калибровано: +0.5 */
+    [175, 0,   175, 4,   '≈+4 м/с (от радара)'],   /* калибровано: +5.0 */
+    [123, 0,   123, 7,   '≈+7 м/с (от радара)'],   /* калибровано: +6.0 */
+    [145, 0,   0,   10,  '≈+10 м/с (от радара)'],  /* калибровано: +10.5 */
+    [178, 0,   0,   14,  '≈+14 м/с (от радара)'],
+    [202, 0,   0,   18,  '≈+18 м/с (от радара)'],
+    [235, 0,   0,   22,  '≈+22 м/с (от радара)'],
+    [253, 58,  58,  28,  '≈+28 м/с (от радара)'],
+    [253, 119, 109, 36,  '≈+36 м/с (от радара)']
+  ];
   var HISTORY_MINUTES = 190, MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
   var BASE_RES_KM = 2;
 
@@ -314,6 +341,28 @@
   };
   var satChIdx = 0;
   try { var savedCh = localStorage.getItem('satChannel'); var fi = SAT_CHANNELS.findIndex(function(c) { return c.id === savedCh; }); if (fi >= 0) satChIdx = fi; } catch (e) {}
+  /* ─── Грозовые продукты (раздел «Спутник», отдельные от каналов EUMETSAT).
+     CIN РЕАЛИЗОВАН: Open-Meteo отдаёт его как hourly=convective_inhibition
+     (проверено живьём: HTTP 200, Дж/кг; параметр «cin» действительно даёт 400 —
+     другое имя переменной). SUPERCELL — ЧЕСТНАЯ ОЦЕНКА из CAPE + сдвига ветра
+     (не SCP NOAA). COMPOSITE — WMS-композиты отражаемости через /api/nowcastProxy. */
+  var SAT_PRODUCTS = [
+    { id: 'composite', label: 'COMPOSITE (композит dBZ)', kind: 'wms' },
+    { id: 'cape', label: 'CAPE (конвективная энергия)', kind: 'grid' },
+    { id: 'cin', label: 'CIN (задерживающая энергия)', kind: 'grid' },
+    { id: 'scp', label: 'SUPERCELL (оценка SCP)', kind: 'grid' }
+  ];
+  var satProduct = null; /* null = обычный канал EUMETSAT */
+  try { var savedProd = localStorage.getItem('satProduct'); if (SAT_PRODUCTS.some(function(p) { return p.id === savedProd; })) satProduct = savedProd; } catch (e) {}
+  function prodActive() { return S.layer === 'sat' && !!satProduct; }
+  function prodDef() { for (var i = 0; i < SAT_PRODUCTS.length; i++) if (SAT_PRODUCTS[i].id === satProduct) return SAT_PRODUCTS[i]; return null; }
+  /* Регион композита: FMI (Европа) или BALTRAD (ДМРЛ РФ) */
+  var COMPOSITE_REGIONS = [
+    { id: 'fmi_open_composite_dbz', label: 'FMI (Европа)' },
+    { id: 'baltrad_dbz', label: 'ДМРЛ РФ' }
+  ];
+  var compositeRegionIdx = 0;
+  try { var crs2 = localStorage.getItem('prodCompositeRegion'); var cri = COMPOSITE_REGIONS.findIndex(function(r) { return r.id === crs2; }); if (cri >= 0) compositeRegionIdx = cri; } catch (e) {}
 
   function satIso(ts) { return new Date(ts * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'); }
 
@@ -577,9 +626,9 @@
   }
 
   /* ─── Время: сетка и глубина истории зависят от слоя (радар 10 мин / спутник 15 мин) ─── */
-  function stepSec() { return S.layer === 'sat' ? SAT_STEP : (S.layer === 'dop' ? 600 : STEP); }   /* доплер nowcast: шаг 10 мин */
-  function delaySec() { return S.layer === 'sat' ? SAT_DELAY : (S.layer === 'dop' ? 900 : DELAY); } /* задержка публикации BUFR ~15 мин */
-  function histSec() { return S.layer === 'sat' ? SAT_HISTORY_SEC : (S.layer === 'dop' ? 3 * 3600 : MAX_HISTORY_SEC); } /* история 3 ч */
+  function stepSec() { if (S.layer === 'sat' && satProduct === 'composite') return 600; return S.layer === 'sat' ? SAT_STEP : (S.layer === 'dop' ? 600 : STEP); }   /* доплер/композит: шаг 10 мин */
+  function delaySec() { if (S.layer === 'sat' && satProduct === 'composite') return 900; return S.layer === 'sat' ? SAT_DELAY : (S.layer === 'dop' ? 900 : DELAY); } /* задержка публикации BUFR ~15 мин */
+  function histSec() { if (S.layer === 'sat' && satProduct === 'composite') return 3 * 3600; return S.layer === 'sat' ? SAT_HISTORY_SEC : (S.layer === 'dop' ? 3 * 3600 : MAX_HISTORY_SEC); } /* история 3 ч */
   function nowTs() { return Math.floor((Date.now() / 1000 - delaySec()) / stepSec()) * stepSec(); }
   function minTs() { return nowTs() - histSec(); }
   S.ts = nowTs();
@@ -605,7 +654,8 @@
   var satBackdropLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', { subdomains: 'abcd', maxZoom: 20, zIndex: 5, crossOrigin: 'anonymous', attribution: '© OpenStreetMap, © CARTO' });
   function satBackdropActive() { return map.hasLayer(satBackdropLayer); }
   function updateSatBackdrop(animate) {
-    var need = (S.layer === 'sat' && currentTheme !== 'dark' && satBackdropOn);
+    /* тёмная подложка — только под снимками EUMETSAT; продуктам она мешает читать карту */
+    var need = (S.layer === 'sat' && !satProduct && currentTheme !== 'dark' && satBackdropOn);
     if (need && !map.hasLayer(satBackdropLayer)) {
       if (animate && !REDUCE_MOTION) {
         /* плавное проявление ~300мс через rAF — без резкого «потемнения» карты */
@@ -656,6 +706,7 @@
   function setChip(text) { var el = $('dbg'); if (el.textContent !== text) el.textContent = text; }
   function satUpdateChip(err) {
     if (S.layer !== 'sat') return;
+    if (satProduct) { prodUpdateChip(); return; } /* активен грозовой продукт — свой чип */
     var ch = SAT_CHANNELS[satChIdx];
     /* Пока не пришёл ни один тайл — честная «загрузка…» вместо ложного LIVE */
     if (satLoading && satTilesDone === 0) { setChip('🛰 ' + ch.label + ' · загрузка… · © EUMETSAT'); return; }
@@ -673,6 +724,11 @@
   var satSwapTmr = null;
   function satApplyTime(immediate) {
     if (S.layer !== 'sat') return;
+    if (satProduct) { /* продукт вместо канала: composite обновляем по времени, сетка от S.ts не зависит */
+      var pdA = prodDef();
+      if (pdA && pdA.kind === 'wms') prodWmsApply(immediate);
+      return;
+    }
     clearTimeout(satSwapTmr);
     satSwapTmr = setTimeout(function() {
       if (S.layer !== 'sat') return;
@@ -693,6 +749,263 @@
       }
       satUpdateChip();
     }, immediate ? 0 : 180);
+  }
+
+  /* ═══ Грозовые продукты раздела «Спутник»: COMPOSITE (WMS) и CAPE/CIN/SCP (сетка) ═══ */
+
+  /* ── COMPOSITE: WMS-композит отражаемости через /api/nowcastProxy (свап-паттерн проекта) ── */
+  var prodWmsLayer = null, prodWmsOld = null, prodWmsSwapTmr = null, prodWmsErr = false;
+  function prodWmsApply(immediate) {
+    if (!prodActive() || prodDef().kind !== 'wms') return;
+    clearTimeout(prodWmsSwapTmr);
+    prodWmsSwapTmr = setTimeout(function() {
+      if (!prodActive() || prodDef().kind !== 'wms') return;
+      var live = S.ts >= nowTs();
+      var old = prodWmsLayer;
+      if (prodWmsOld && map.hasLayer(prodWmsOld)) { map.removeLayer(prodWmsOld); prodWmsOld = null; }
+      var params = {
+        layers: COMPOSITE_REGIONS[compositeRegionIdx].id,
+        format: 'image/png', transparent: true, version: '1.1.1',
+        crs: L.CRS.EPSG4326, tileSize: 256, zIndex: 11, maxZoom: 10,
+        updateWhenIdle: false, keepBuffer: 2, opacity: satOpacityMem / 100
+      };
+      if (!live) params.time = satIso(S.ts);
+      var lyr = new SatWMS('/api/nowcastProxy', params);
+      lyr.on('load', function() { if (lyr === prodWmsLayer) { prodWmsErr = false; $('pulse').classList.remove('busy'); satUpdateChip(); } });
+      lyr.on('loading', function() { if (lyr === prodWmsLayer) { $('pulse').classList.add('busy'); satUpdateChip(); } });
+      lyr.on('tileerror', function() { if (lyr === prodWmsLayer) { prodWmsErr = true; satUpdateChip(); } });
+      lyr.addTo(map);
+      prodWmsLayer = lyr;
+      if (old) {
+        prodWmsOld = old;
+        var rm = function() { if (prodWmsOld === old && map.hasLayer(old)) { map.removeLayer(old); prodWmsOld = null; } };
+        lyr.once('load', rm);
+        setTimeout(rm, 5000);
+      }
+      satUpdateChip();
+    }, immediate ? 0 : 180);
+  }
+  function prodWmsRemove() {
+    clearTimeout(prodWmsSwapTmr);
+    if (prodWmsLayer) { if (map.hasLayer(prodWmsLayer)) map.removeLayer(prodWmsLayer); prodWmsLayer = null; }
+    if (prodWmsOld) { if (map.hasLayer(prodWmsOld)) map.removeLayer(prodWmsOld); prodWmsOld = null; }
+    prodWmsErr = false;
+  }
+  function setCompositeRegion(idx) {
+    if (idx < 0 || idx >= COMPOSITE_REGIONS.length || idx === compositeRegionIdx) return;
+    compositeRegionIdx = idx;
+    try { localStorage.setItem('prodCompositeRegion', COMPOSITE_REGIONS[idx].id); } catch (e) {}
+    if (prodActive() && prodDef().kind === 'wms') prodWmsApply(true);
+    buildLegend();
+    toast('COMPOSITE: ' + COMPOSITE_REGIONS[idx].label);
+  }
+
+  /* ── CAPE/CIN/SCP: сетка Open-Meteo (CORS *, без ключа) на канвасе #prod-canvas.
+     Один запрос тянет ВСЕ переменные (cape, convective_inhibition, ветер 10/180 м) —
+     переключение продуктов не требует рефетча. Батчи по 50 точек, AbortController,
+     TTL 10 мин, пересчёт при moveend (дебаунс 600мс) и раз в 15 мин. ── */
+  var prodCanvas = document.createElement('canvas');
+  prodCanvas.id = 'prod-canvas';
+  document.body.appendChild(prodCanvas);
+  var prodCtx = prodCanvas.getContext('2d');
+  function prodResizeCanvas() {
+    prodCanvas.width = Math.round(innerWidth * DPR); prodCanvas.height = Math.round(innerHeight * DPR);
+    prodCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  prodResizeCanvas();
+  window.addEventListener('resize', function() { prodResizeCanvas(); schedProdDraw(); });
+  var prodGrid = { pts: [], times: null, hourIdx: 0, key: '', fetchedAt: 0, ctrl: null, loading: false, err: null };
+  function prodGridActive() { return prodActive() && prodDef().kind === 'grid'; }
+  function prodGridKey(b, cols, rows) {
+    var r = function(v) { return Math.round(v * 2) / 2; };
+    return [r(b.getWest()), r(b.getSouth()), r(b.getEast()), r(b.getNorth()), cols, rows].join('|');
+  }
+  function fetchProdGrid(force) {
+    if (!prodGridActive()) return;
+    var b = map.getBounds();
+    /* ячейка ~110px экрана; потолок 12×10 = 120 точек (лимиты Open-Meteo щадим) */
+    var cols = Math.max(4, Math.min(12, Math.round(innerWidth / 110)));
+    var rows = Math.max(4, Math.min(10, Math.round(innerHeight / 110)));
+    var key = prodGridKey(b, cols, rows);
+    if (!force && key === prodGrid.key && Date.now() - prodGrid.fetchedAt < 10 * 60 * 1000) { schedProdDraw(); return; }
+    if (prodGrid.ctrl) prodGrid.ctrl.abort();
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    prodGrid.ctrl = ctrl; prodGrid.loading = true; prodGrid.err = null; satUpdateChip();
+    var dLat = (b.getNorth() - b.getSouth()) / rows, dLon = (b.getEast() - b.getWest()) / cols;
+    var pts = [];
+    for (var ry = 0; ry < rows; ry++) for (var cx = 0; cx < cols; cx++) {
+      var lat = b.getSouth() + (ry + 0.5) * dLat, lon = b.getWest() + (cx + 0.5) * dLon;
+      if (lat > 84 || lat < -84) continue; /* за пределами данных модели */
+      pts.push({ lat: +lat.toFixed(3), lon: +lon.toFixed(3), dLat: dLat / 2, dLon: dLon / 2, v: null });
+    }
+    var batches = [];
+    for (var i0 = 0; i0 < pts.length; i0 += 50) batches.push(pts.slice(i0, i0 + 50));
+    Promise.all(batches.map(function(batch) {
+      var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + batch.map(function(p) { return p.lat; }).join(',') +
+        '&longitude=' + batch.map(function(p) { return p.lon; }).join(',') +
+        '&hourly=cape,convective_inhibition,wind_speed_10m,wind_speed_180m&forecast_days=1';
+      return fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function(j) {
+        var arr = Array.isArray(j) ? j : [j];
+        arr.forEach(function(res, i) {
+          if (batch[i] && res && res.hourly) batch[i].v = res.hourly;
+          if (!prodGrid.times && res && res.hourly && res.hourly.time) prodGrid.times = res.hourly.time;
+        });
+      });
+    })).then(function() {
+      if (prodGrid.ctrl !== ctrl) return; /* пришёл более новый запрос */
+      /* индекс часа: ближайший к текущему времени (модель почасовая, UTC) */
+      var hi = 0;
+      if (prodGrid.times) {
+        var now = Date.now(), bd2 = 1e15;
+        prodGrid.times.forEach(function(t, i) { var d = Math.abs(Date.parse(t + 'Z') - now); if (d < bd2) { bd2 = d; hi = i; } });
+      }
+      prodGrid.pts = pts; prodGrid.hourIdx = hi; prodGrid.key = key; prodGrid.fetchedAt = Date.now();
+      prodGrid.loading = false; prodGrid.err = null;
+      satUpdateChip(); schedProdDraw();
+    }).catch(function(e) {
+      if (prodGrid.ctrl !== ctrl || (e && e.name === 'AbortError')) return;
+      prodGrid.loading = false; prodGrid.err = 'сеть/сервер';
+      satUpdateChip();
+    });
+  }
+  /* Шкалы продуктов (стопы — общепринятые метео-градации конвективных индексов) */
+  function capeColor(v) { /* Дж/кг: <100 незначимо */
+    if (!(v >= 100)) return null;
+    if (v < 500) return [74, 222, 128];    /* слабая неустойчивость */
+    if (v < 1000) return [253, 224, 71];   /* умеренная */
+    if (v < 2000) return [249, 115, 22];   /* сильная */
+    if (v < 3000) return [220, 38, 38];    /* очень сильная */
+    return [162, 28, 175];                 /* экстремальная */
+  }
+  function cinColor(v) { /* Дж/кг задерживающей энергии: <15 незначимо */
+    if (!(v >= 15)) return null;
+    if (v < 50) return [147, 197, 253];    /* слабое подавление */
+    if (v < 100) return [59, 130, 246];    /* умеренное */
+    if (v < 200) return [29, 78, 216];     /* сильное */
+    return [107, 33, 168];                 /* конвекция маловероятна */
+  }
+  /* SCP-оценка: совместно CAPE и сдвиг ветра 10→180 м (proxy сдвига 0–6 км, м/с).
+     Пороги приближённые: суперячейки требуют И энергии, И сдвига. НЕ SCP NOAA. */
+  function scpScore(cape, shearMs) {
+    if (cape >= 2500 && shearMs >= 20) return 3;
+    if (cape >= 1500 && shearMs >= 15) return 2;
+    if (cape >= 800 && shearMs >= 12) return 1;
+    return 0;
+  }
+  var SCP_COLORS = [null, [253, 224, 71], [249, 115, 22], [220, 38, 38]];
+  function prodCellColor(p) {
+    if (!p.v) return null;
+    var hi = prodGrid.hourIdx;
+    if (satProduct === 'cape') return capeColor(p.v.cape ? p.v.cape[hi] : null);
+    if (satProduct === 'cin') return cinColor(p.v.convective_inhibition ? p.v.convective_inhibition[hi] : null);
+    if (satProduct === 'scp') {
+      var cape = p.v.cape ? p.v.cape[hi] : 0;
+      var shear = ((p.v.wind_speed_180m ? p.v.wind_speed_180m[hi] : 0) - (p.v.wind_speed_10m ? p.v.wind_speed_10m[hi] : 0)) / 3.6; /* км/ч → м/с */
+      return SCP_COLORS[scpScore(cape || 0, shear || 0)];
+    }
+    return null;
+  }
+  /* Общая отрисовка ячеек (экран и экспорт): полупрозрачные прямоугольники */
+  function drawProdCells(ctx) {
+    var n = 0;
+    prodGrid.pts.forEach(function(p) {
+      var col = prodCellColor(p);
+      if (!col) return;
+      var c1 = map.latLngToContainerPoint(L.latLng(p.lat + p.dLat, p.lon - p.dLon));
+      var c2 = map.latLngToContainerPoint(L.latLng(p.lat - p.dLat, p.lon + p.dLon));
+      ctx.fillStyle = 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',0.45)';
+      ctx.fillRect(Math.min(c1.x, c2.x), Math.min(c1.y, c2.y), Math.abs(c2.x - c1.x) + 1, Math.abs(c2.y - c1.y) + 1);
+      n++;
+    });
+    return n;
+  }
+  var prodDrawPending = false;
+  function schedProdDraw() {
+    if (prodDrawPending) return;
+    prodDrawPending = true;
+    requestAnimationFrame(function() {
+      prodDrawPending = false;
+      prodCtx.clearRect(0, 0, innerWidth, innerHeight);
+      if (prodGridActive()) drawProdCells(prodCtx);
+    });
+  }
+  /* Канвас следует за картой; refetch — по покою карты */
+  var prodMoveTmr = null;
+  map.on('move zoom', function() { if (prodGridActive()) schedProdDraw(); });
+  map.on('moveend', function() {
+    if (!prodGridActive()) return;
+    schedProdDraw();
+    clearTimeout(prodMoveTmr);
+    prodMoveTmr = setTimeout(function() { fetchProdGrid(false); }, 600);
+  });
+  setInterval(function() { /* модель обновляется нечасто — 15 мин достаточно */
+    if (prodGridActive() && document.visibilityState === 'visible') fetchProdGrid(true);
+  }, 15 * 60 * 1000);
+
+  /* ── Вход/выход продукта: WMS-слой или сетка; таймлайн только у composite ── */
+  function prodEnter() {
+    var pd = prodDef();
+    if (!pd) return;
+    /* канал EUMETSAT снимается — продукт сам по себе слой */
+    if (eumetsatLayer) { map.removeLayer(eumetsatLayer); eumetsatLayer = null; }
+    if (satOldLayer) { if (map.hasLayer(satOldLayer)) map.removeLayer(satOldLayer); satOldLayer = null; }
+    satLoading = false; $('pulse').classList.remove('busy');
+    if (pd.kind === 'wms') {
+      if (!hiddenPanels['tl']) $('tl').style.display = 'flex'; /* композит: история, шаг 10 мин */
+      S.manualTime = false; S.ts = nowTs(); buildFrames(); updHUD();
+      prodWmsApply(true);
+    } else {
+      $('tl').style.display = 'none'; $('restore-tl').style.display = 'none'; /* модель почасовая — таймлайн не нужен */
+      prodCanvas.style.display = 'block';
+      fetchProdGrid(true);
+    }
+    buildLegend(); satUpdateChip();
+  }
+  function prodExit() {
+    prodWmsRemove();
+    if (prodGrid.ctrl) { prodGrid.ctrl.abort(); prodGrid.ctrl = null; }
+    prodGrid.loading = false;
+    prodCanvas.style.display = 'none';
+    prodCtx.clearRect(0, 0, innerWidth, innerHeight);
+    if (S.layer === 'sat' && !hiddenPanels['tl']) $('tl').style.display = 'flex';
+  }
+  function setSatProduct(id) {
+    if (id === satProduct) return;
+    var prev = satProduct;
+    satProduct = id;
+    try { if (id) localStorage.setItem('satProduct', id); else localStorage.removeItem('satProduct'); } catch (e) {}
+    if (S.layer !== 'sat') { syncChannelUI(); return; } /* применится при входе в sat */
+    if (prev) prodExit();
+    if (id) {
+      prodEnter();
+      toast('Продукт: ' + prodDef().label);
+    } else {
+      /* возврат к каналу EUMETSAT */
+      S.manualTime = false; S.ts = nowTs(); buildFrames(); updHUD();
+      satApplyTime(true);
+      buildLegend(); satUpdateChip();
+      toast('Канал: ' + SAT_CHANNELS[satChIdx].label);
+    }
+    syncChannelUI();
+    saveViewDebounced();
+  }
+  /* Чип продуктов: источники — 4x4 (композит) и Open-Meteo (модельная сетка) */
+  function prodUpdateChip() {
+    var pd = prodDef();
+    if (!pd) return;
+    if (pd.kind === 'wms') {
+      var live = S.ts >= nowTs();
+      var tstr = new Date((live ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+      setChip('COMPOSITE · 4x4 (' + COMPOSITE_REGIONS[compositeRegionIdx].label + ') · ' + tstr + ' МСК' + (live ? ' (LIVE)' : '') + (prodWmsErr ? ' · ⚠️ ошибки тайлов' : '') + dmrlChipSuffix() + ltgChipSuffix());
+    } else {
+      var hstr = (prodGrid.times && prodGrid.times[prodGrid.hourIdx])
+        ? new Date(Date.parse(prodGrid.times[prodGrid.hourIdx] + 'Z')).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : '—';
+      var name = pd.id === 'cape' ? 'CAPE' : (pd.id === 'cin' ? 'CIN' : 'SUPERCELL · оценка');
+      setChip(name + ' · Open-Meteo · ' + hstr + ' МСК · ' + prodGrid.pts.length + ' точек' + (prodGrid.loading ? ' · ⏳' : '') + (prodGrid.err ? ' · ⚠️ ' + prodGrid.err : '') + dmrlChipSuffix() + ltgChipSuffix());
+    }
   }
 
   /* ─── Crossfade канваса радара при переключении radar↔sat (вместо резкого display) ─── */
@@ -831,7 +1144,7 @@
     if (radarNcActive()) { /* dBZ с nowcast: рисует WMS-слой, канвас пуст */
       var liveNc = S.ts >= nowTs();
       var tNc = new Date((liveNc ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-      setChip((S.layer === 'wx' ? 'ОЯ · nowcast (BUFR: Мск·Нвс·Влд)' : 'dBZ · nowcast (' + RADAR_NC_LAYERS[radarNcIdx].label + ')') + ' · ' + tNc + ' МСК' + (liveNc ? ' (LIVE)' : '') + (radarNcLoading ? ' · ⏳' : '') + (radarNcErr ? ' · ⚠️ ' + radarNcErr : '') + (!S.dbzVisible ? ' · слой скрыт' : '') + dmrlChipSuffix() + ltgChipSuffix());
+      setChip((S.layer === 'wx' ? 'ОЯ · 4x4 (BUFR: Мск·Нвс·Влд)' : 'dBZ · 4x4 (' + RADAR_NC_LAYERS[radarNcIdx].label + ')') + ' · ' + tNc + ' МСК' + (liveNc ? ' (LIVE)' : '') + (radarNcLoading ? ' · ⏳' : '') + (radarNcErr ? ' · ⚠️ ' + radarNcErr : '') + (!S.dbzVisible ? ' · слой скрыт' : '') + dmrlChipSuffix() + ltgChipSuffix());
       return;
     }
     if (S.layer === 'dop') { dopUpdateChip(); return; }
@@ -1081,7 +1394,7 @@
     var hh = ' · ' + DOP_HEIGHTS[dopHeightIdx].label;
     var live = S.ts >= nowTs();
     var tstr = new Date((live ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-    setChip('🌀 Доплер ДМРЛ (nowcast.ru)' + hh + ' · ' + tstr + ' МСК' + (live ? ' (LIVE)' : '') + (nowcastLoading ? ' · ⏳' : '') + (nowcastErr ? ' · ⚠️ ' + nowcastErr : '') + dmrlChipSuffix() + ltgChipSuffix());
+    setChip('🌀 Доплер ДМРЛ (4x4)' + hh + ' · ' + tstr + ' МСК' + (live ? ' (LIVE)' : '') + (nowcastLoading ? ' · ⏳' : '') + (nowcastErr ? ' · ⚠️ ' + nowcastErr : '') + dmrlChipSuffix() + ltgChipSuffix());
   }
 
   /* ═══ Настоящий доплер: WMS nowcast.ru через /api/nowcastProxy ═══
@@ -1123,9 +1436,9 @@
       nowcastFails++;
       if (nowcastFails >= 6) {
         /* Модельного fallback больше нет: показываем честную ошибку. */
-        nowcastErr = 'nowcast недоступен — нажмите ↻';
+        nowcastErr = '4x4 недоступен — нажмите ↻';
         nowcastLoading = false; $('pulse').classList.remove('busy'); dopUpdateChip();
-        if (Date.now() - satErrToastTs > 30000) { satErrToastTs = Date.now(); toast('⚠️ Доплер (nowcast) недоступен'); }
+        if (Date.now() - satErrToastTs > 30000) { satErrToastTs = Date.now(); toast('⚠️ Доплер (4x4) недоступен'); }
       } else if (nowcastFails >= 3) {
         nowcastErr = 'ошибки тайлов'; nowcastLoading = false; $('pulse').classList.remove('busy'); dopUpdateChip();
       }
@@ -1288,7 +1601,7 @@
       /* БЛОК B: авто-fallback на rainradar. Авто-возврата НЕТ — периодические
          пробные запросы дёргали бы полуживой сервер и мигали слоем;
          возврат — вручную кнопкой «Источник» в легенде. */
-      toast('⚠️ ДМРЛ/nowcast недоступен — переключаюсь на rainradar');
+      toast('⚠️ ДМРЛ (4x4) недоступен — переключаюсь на rainradar');
       setRadarSource('rainradar', true);
     } else if (radarNcFails >= 3) {
       radarNcErr = 'ошибки тайлов'; radarNcLoading = false; $('pulse').classList.remove('busy'); schedRender();
@@ -1368,7 +1681,7 @@
       radarNcFails = 0; radarNcErr = null;
       fadeCanvas(false); /* канвас не нужен — рисует WMS-слой */
       radarNcApply(true);
-      if (!auto) toast((S.layer === 'wx' ? 'Явления' : 'Радар') + ': nowcast.ru (ДМРЛ)');
+      if (!auto) toast((S.layer === 'wx' ? 'Явления' : 'Радар') + ': 4x4 (ДМРЛ)');
     } else {
       radarNcRemove();
       fadeCanvas(true); /* обратно на канвас rainradar */
@@ -1407,8 +1720,9 @@
       /* Пересоздаём слой с сохранением выбранного канала и времени кадра */
       satErrToastTs = 0;
       satApplyTime(true);
+      if (prodGridActive()) fetchProdGrid(true); /* сетка продукта — принудительный рефетч */
       buildFrames(); updHUD();
-      toast('Спутник обновлён'); 
+      toast(satProduct ? 'Продукт обновлён' : 'Спутник обновлён'); 
       return; 
     }
     if (ltg.on) fetchLtg(true); /* ↻ обновляет и молнии */
@@ -1499,6 +1813,7 @@
       /* ─── Спец-слои: чистая базовая карта + оверлей (маркеры ДМРЛ / сетка ветра).
          Радар-канвас и спутник выключаем: это самостоятельные режимы без временных
          кадров — таймлайн скрываем (истории нет), ↻ лишь перерисовывает/обновляет. ─── */
+      prodExit(); /* грозовой продукт (если был в sat) — убрать слой/канвас */
       if (eumetsatLayer) { map.removeLayer(eumetsatLayer); eumetsatLayer = null; }
       if (satOldLayer) { if (map.hasLayer(satOldLayer)) map.removeLayer(satOldLayer); satOldLayer = null; }
       satLoading = false; $('pulse').classList.remove('busy');
@@ -1515,7 +1830,7 @@
         S.manualTime = false; S.ts = nowTs();
         buildFrames(); updHUD();
         dopStart();
-        toast('🌀 Доплер: радиальная скорость ДМРЛ (nowcast.ru)');
+        toast('🌀 Доплер: радиальная скорость ДМРЛ (4x4)');
       }
       schedRender(); /* чип обновится в doRender */
       dmrlSync();
@@ -1539,13 +1854,14 @@
       $('channel-wrapper').style.display = 'block';
       S.manualTime = false; S.ts = nowTs();
       buildFrames(); updHUD();
-      satApplyTime(true);
+      if (satProduct) { prodEnter(); } else { satApplyTime(true); } /* сохранённый продукт восстанавливаем вместо канала */
       updateSatBackdrop(true); /* на light/scheme — тёмная подложка, иначе снимки сливаются с белой картой */
       map.invalidateSize();
-      toast('Спутник EUMETSAT: ' + SAT_CHANNELS[satChIdx].label);
+      toast(satProduct ? ('Продукт: ' + prodDef().label) : ('Спутник EUMETSAT: ' + SAT_CHANNELS[satChIdx].label));
     } else {
       /* Возврат к радару: снимаем WMS-слои, канвас плавно проявляется */
       startFrameFade(); /* снимок старого слоя для crossfade (radar↔wx) */
+      prodExit(); /* грозовой продукт (если был) — слой/канвас долой, satProduct сохранён */
       if (eumetsatLayer) { map.removeLayer(eumetsatLayer); eumetsatLayer = null; }
       if (satOldLayer) { if (map.hasLayer(satOldLayer)) map.removeLayer(satOldLayer); satOldLayer = null; }
       satLoading = false; $('pulse').classList.remove('busy');
@@ -1573,12 +1889,16 @@
 
   /* ─── Выбор канала спутника ─── */
   function setSatChannel(idx) {
-    if (idx < 0 || idx >= SAT_CHANNELS.length || idx === satChIdx) { $('channel-dropdown').classList.remove('visible'); return; }
+    /* клик по текущему каналу при АКТИВНОМ продукте = возврат к каналу */
+    if (idx < 0 || idx >= SAT_CHANNELS.length || (idx === satChIdx && !satProduct)) { $('channel-dropdown').classList.remove('visible'); return; }
+    var hadProd = !!satProduct;
+    if (hadProd) setSatProduct(null); /* выбор канала выключает грозовой продукт */
+    if (idx === satChIdx) { syncChannelUI(); $('channel-dropdown').classList.remove('visible'); return; }
     satChIdx = idx;
     try { localStorage.setItem('satChannel', SAT_CHANNELS[idx].id); } catch (e) {}
     var ch = SAT_CHANNELS[idx];
     $('btn-channel').textContent = 'Канал: ' + ch.label;
-    document.querySelectorAll('#channel-dropdown .dd-item').forEach(function(item, i) { item.classList.toggle('active', i === idx); });
+    syncChannelUI();
     $('channel-dropdown').classList.remove('visible');
     /* Подсказка для дневных каналов ночью (грубая оценка: 03–17 UTC ≈ светлое время для зоны MSG) */
     var utcH = new Date().getUTCHours();
@@ -1588,18 +1908,43 @@
     satUpdateChip();
     saveViewDebounced();
   }
+  /* Подсветка активного пункта (канал ИЛИ продукт) + текст кнопки */
+  function syncChannelUI() {
+    document.querySelectorAll('#channel-dropdown .dd-item').forEach(function(item) {
+      var pid = item.dataset.prod;
+      if (pid) item.classList.toggle('active', pid === satProduct);
+      else item.classList.toggle('active', !satProduct && +item.dataset.ch === satChIdx);
+    });
+    $('btn-channel').textContent = satProduct ? ('Продукт: ' + prodDef().label.split(' (')[0]) : ('Канал: ' + SAT_CHANNELS[satChIdx].label);
+  }
   function initChannelUI() {
     var dd = $('channel-dropdown');
     SAT_CHANNELS.forEach(function(ch, i) {
       var item = document.createElement('div');
-      item.className = 'dd-item' + (i === satChIdx ? ' active' : '');
+      item.className = 'dd-item' + (i === satChIdx && !satProduct ? ' active' : '');
+      item.dataset.ch = i;
       item.setAttribute('tabindex', '0'); item.setAttribute('role', 'button');
       item.textContent = ch.label + (ch.day ? ' ☀️' : '');
       item.addEventListener('click', function() { setSatChannel(i); });
       item.addEventListener('keydown', function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSatChannel(i); $('btn-channel').focus(); } });
       dd.appendChild(item);
     });
-    $('btn-channel').textContent = 'Канал: ' + SAT_CHANNELS[satChIdx].label;
+    /* Раздел грозовых продуктов: отдельные слои (не каналы EUMETSAT) */
+    var sep = document.createElement('div');
+    sep.className = 'dd-sep';
+    sep.textContent = '— Грозовые продукты —';
+    dd.appendChild(sep);
+    SAT_PRODUCTS.forEach(function(pd) {
+      var item = document.createElement('div');
+      item.className = 'dd-item' + (pd.id === satProduct ? ' active' : '');
+      item.dataset.prod = pd.id;
+      item.setAttribute('tabindex', '0'); item.setAttribute('role', 'button');
+      item.textContent = pd.label;
+      item.addEventListener('click', function() { setSatProduct(pd.id); $('channel-dropdown').classList.remove('visible'); });
+      item.addEventListener('keydown', function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSatProduct(pd.id); dd.classList.remove('visible'); $('btn-channel').focus(); } });
+      dd.appendChild(item);
+    });
+    $('btn-channel').textContent = satProduct ? ('Продукт: ' + prodDef().label.split(' (')[0]) : ('Канал: ' + SAT_CHANNELS[satChIdx].label);
     $('btn-channel').addEventListener('click', function(e) { e.stopPropagation(); dd.classList.toggle('visible'); });
     document.addEventListener('click', function(e) { if (!$('channel-wrapper').contains(e.target)) dd.classList.remove('visible'); });
   }
@@ -1638,6 +1983,72 @@
   function setLegendTitle(t) { var el = $('ltitle'); if (el.textContent !== t) { el.textContent = t; retrig(el, 'title-swap'); } }
   function buildLegend() { 
     var el = $('lbody'); el.innerHTML = ''; 
+    /* ─── Легенды грозовых продуктов (раздел «Спутник») ─── */
+    if (S.layer === 'sat' && satProduct) {
+      var pdL = prodDef();
+      var mkRow = function(color, text) {
+        var row = document.createElement('div'); row.className = 'li';
+        var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = color;
+        var tt = document.createElement('span'); tt.textContent = text;
+        row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
+      };
+      var mkNote = function(text) { var n = document.createElement('div'); n.className = 'li legend-note'; n.textContent = text; el.appendChild(n); };
+      if (satProduct === 'composite') {
+        setLegendTitle('COMPOSITE · ОТРАЖАЕМОСТЬ dBZ');
+        /* шкала dBZ — стандартная палитра радара (цвета источника близки к ней) */
+        BUILTIN_RADAR.forEach(function(e2, i2) {
+          var rowC = document.createElement('div'); rowC.className = 'li'; rowC.style.setProperty('--i', Math.min(i2, 14));
+          var sqC = document.createElement('div'); sqC.className = 'lsq'; sqC.style.background = 'rgb(' + e2.r.join(',') + ')';
+          if (!e2.r[0] && !e2.r[1] && !e2.r[2]) sqC.style.border = '1px solid #555';
+          var ttC = document.createElement('span'); ttC.textContent = e2.l;
+          rowC.appendChild(sqC); rowC.appendChild(ttC); el.appendChild(rowC);
+        });
+        var regBtn = document.createElement('button');
+        regBtn.className = 'btn mini-btn on';
+        regBtn.textContent = 'Регион: ' + COMPOSITE_REGIONS[compositeRegionIdx].label;
+        regBtn.addEventListener('click', function() { setCompositeRegion((compositeRegionIdx + 1) % COMPOSITE_REGIONS.length); });
+        el.appendChild(regBtn);
+        mkNote('Композит отражаемости · 4x4 · шаг 10 мин');
+        mkNote('FMI — Европа/СЗ РФ; ДМРЛ РФ — Москва/Новосибирск/Владивосток');
+      } else if (satProduct === 'cape') {
+        setLegendTitle('CAPE · Дж/кг');
+        var gC = document.createElement('div'); gC.className = 'lgrad li';
+        gC.style.background = 'linear-gradient(to right, #4ade80, #fde047, #f97316, #dc2626, #a21caf)';
+        el.appendChild(gC);
+        var capC = document.createElement('div'); capC.className = 'li lgrad-cap';
+        capC.innerHTML = '<span>100</span><span>1000</span><span>3000+</span>'; el.appendChild(capC);
+        mkRow('#4ade80', '100–500 — слабая неустойчивость');
+        mkRow('#fde047', '500–1000 — умеренная');
+        mkRow('#f97316', '1000–2000 — сильная');
+        mkRow('#dc2626', '2000–3000 — очень сильная');
+        mkRow('#a21caf', '>3000 — экстремальная');
+        mkNote('CAPE — конвективная доступная потенциальная энергия');
+        mkNote('Модель Open-Meteo · сетка по видимой области · час, ближайший к текущему');
+      } else if (satProduct === 'cin') {
+        setLegendTitle('CIN · Дж/кг');
+        var gI = document.createElement('div'); gI.className = 'lgrad li';
+        gI.style.background = 'linear-gradient(to right, #93c5fd, #3b82f6, #1d4ed8, #6b21a8)';
+        el.appendChild(gI);
+        var capI = document.createElement('div'); capI.className = 'li lgrad-cap';
+        capI.innerHTML = '<span>15</span><span>100</span><span>200+</span>'; el.appendChild(capI);
+        mkRow('#93c5fd', '15–50 — слабое подавление');
+        mkRow('#3b82f6', '50–100 — умеренное');
+        mkRow('#1d4ed8', '100–200 — сильное');
+        mkRow('#6b21a8', '>200 — конвекция маловероятна');
+        mkNote('CIN — энергия задерживающего слоя (подавляет развитие конвекции)');
+        mkNote('Модель Open-Meteo · сетка по видимой области');
+      } else if (satProduct === 'scp') {
+        setLegendTitle('SUPERCELL · ОЦЕНКА');
+        mkRow('#fde047', '1 — слабые условия (CAPE≥800, сдвиг≥12 м/с)');
+        mkRow('#f97316', '2 — умеренные (CAPE≥1500, сдвиг≥15 м/с)');
+        mkRow('#dc2626', '3 — сильные (CAPE≥2500, сдвиг≥20 м/с)');
+        mkNote('Совместно: CAPE и сдвиг ветра 10→180 м (proxy сдвига 0–6 км)');
+        mkNote('⚠️ Приближённая оценка по модели Open-Meteo, НЕ SCP NOAA');
+      }
+      appendDmrlLegend(el);
+      appendLtgLegend(el);
+      return;
+    }
     if (S.layer === 'sat') {
       var ch = SAT_CHANNELS[satChIdx];
       setLegendTitle('СПУТНИК · ' + ch.label.toUpperCase());
@@ -1742,7 +2153,7 @@
         row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
       });
       var n1 = document.createElement('div'); n1.className = 'li legend-note'; n1.textContent = 'Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + ' · шаг 10 мин'; el.appendChild(n1);
-      var n2 = document.createElement('div'); n2.className = 'li legend-note'; n2.textContent = 'Радиальная скорость ДМРЛ · nowcast.ru (Росгидромет/BUFR)'; el.appendChild(n2);
+      var n2 = document.createElement('div'); n2.className = 'li legend-note'; n2.textContent = 'Радиальная скорость ДМРЛ · 4x4 (Росгидромет/BUFR)'; el.appendChild(n2);
       var n3 = document.createElement('div'); n3.className = 'li legend-note'; n3.textContent = 'Покрытие: Москва/Новосибирск/Владивосток + FMI (не вся РФ)'; el.appendChild(n3);
       var n4 = document.createElement('div'); n4.className = 'li legend-note'; n4.textContent = 'Клик по карте — скорость (м/с) в точке'; el.appendChild(n4);
       appendDmrlLegend(el);
@@ -1764,11 +2175,11 @@
       });
       var wxSrcBtn = document.createElement('button');
       wxSrcBtn.className = 'btn mini-btn on';
-      wxSrcBtn.textContent = 'Источник: nowcast (ДМРЛ)';
+      wxSrcBtn.textContent = 'Источник: 4x4 (ДМРЛ)';
       wxSrcBtn.addEventListener('click', function() { setRadarSource('rainradar', false); });
       el.appendChild(wxSrcBtn);
       var wn1 = document.createElement('div'); wn1.className = 'li legend-note';
-      wn1.textContent = 'ОЯ BUFR — опасные явления ДМРЛ (nowcast.ru), палитра источника';
+      wn1.textContent = 'ОЯ BUFR — опасные явления ДМРЛ (4x4), палитра источника';
       el.appendChild(wn1);
       var wn2 = document.createElement('div'); wn2.className = 'li legend-note';
       wn2.textContent = 'Станции: Москва · Новосибирск · Владивосток';
@@ -1787,7 +2198,7 @@
       /* Переключатель источника радара: nowcast (ДМРЛ, основной) ↔ rainradar (запасной) */
       var srcBtn = document.createElement('button');
       srcBtn.className = 'btn mini-btn' + (radarSource === 'nowcast' ? ' on' : '');
-      srcBtn.textContent = 'Источник: ' + (radarSource === 'nowcast' ? 'nowcast (ДМРЛ)' : 'rainradar');
+      srcBtn.textContent = 'Источник: ' + (radarSource === 'nowcast' ? '4x4 (ДМРЛ)' : 'rainradar');
       srcBtn.addEventListener('click', function() { setRadarSource(radarSource === 'nowcast' ? 'rainradar' : 'nowcast', false); });
       el.appendChild(srcBtn);
       if (radarSource === 'nowcast' && S.layer === 'radar') {
@@ -1837,7 +2248,7 @@
     var n = nowTs();
     if (n !== S.ts) {
       S.ts = n; updHUD();
-      if (S.layer === 'sat') { satApplyTime(true); buildFrames(); toast('Новый снимок спутника'); }
+      if (S.layer === 'sat') { satApplyTime(true); buildFrames(); if (!satProduct) toast('Новый снимок спутника'); }
       else if (radarNcActive()) {
         /* БЛОК C: постоянная передача nowcast — новый кадр раз в ~10 мин, без тоста
            (чип покажет время сам); при скрытой вкладке не дёргаем сеть */
@@ -1881,9 +2292,19 @@
     }
     return (best >= 0 && bd <= 4000) ? { label: WX_NC_PALETTE[best][2], v: WX_NC_PALETTE[best][0] } : null;
   }
+  /* Доплер: цвет → скорость по калиброванной таблице DOP_NC_RGB (nearest) */
+  function dopNcFindInfo(r, g, b) {
+    var best = -1, bd = 1e9;
+    for (var i = 0; i < DOP_NC_RGB.length; i++) {
+      var e = DOP_NC_RGB[i], dr = r - e[0], dg = g - e[1], db = b - e[2];
+      var d = dr * dr + dg * dg + db * db;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return (best >= 0 && bd <= 6000) ? { label: DOP_NC_RGB[best][4], v: DOP_NC_RGB[best][3] } : null;
+  }
   function getNcBlockAt(mx, my) {
-    /* главный слой + доп. станции ОЯ: непрозрачный пиксель ищем по всем */
-    var lyrs = [radarNcLayer].concat(wxNcExtras);
+    /* радар/ОЯ: главный слой + доп. станции; доплер: WMS-слой скорости */
+    var lyrs = (S.layer === 'dop') ? [nowcastLayer] : [radarNcLayer].concat(wxNcExtras);
     var latlng = map.containerPointToLatLng(L.point(mx, my));
     for (var li = 0; li < lyrs.length; li++) {
       var lyr = lyrs[li];
@@ -1905,7 +2326,7 @@
       var fx = ts / cnv.width, fy = ts / cnv.height;
       var c1 = map.latLngToContainerPoint(map.unproject(L.point(tx * ts + ix * fx, ty * ts + iy * fy), z));
       var c2 = map.latLngToContainerPoint(map.unproject(L.point(tx * ts + (ix + 1) * fx, ty * ts + (iy + 1) * fy), z));
-      var info = (S.layer === 'wx') ? wxNcFindInfo(pd[0], pd[1], pd[2]) : findPalEntry(pd[0], pd[1], pd[2]);
+      var info = (S.layer === 'dop') ? dopNcFindInfo(pd[0], pd[1], pd[2]) : ((S.layer === 'wx') ? wxNcFindInfo(pd[0], pd[1], pd[2]) : findPalEntry(pd[0], pd[1], pd[2]));
       return {
         sx: Math.round(Math.min(c1.x, c2.x)), sy: Math.round(Math.min(c1.y, c2.y)),
         sw: Math.max(4, Math.round(Math.abs(c2.x - c1.x))), sh: Math.max(4, Math.round(Math.abs(c2.y - c1.y))),
@@ -1917,6 +2338,7 @@
   }
   
   function getBlockAt(mx, my) { 
+    if (S.layer === 'dop') return getNcBlockAt(mx, my); /* доплер: скорость из пикселя WMS-тайла */
     if ((S.layer !== 'radar' && S.layer !== 'wx') || !S.dbzVisible) return null;
     if (radarNcActive()) return getNcBlockAt(mx, my); /* nowcast: пиксель читается из WMS-тайла */
     var tiles = visTiles(); 
@@ -1942,7 +2364,7 @@
     return null; 
   }
   
-  function updateCrosshair() { if (!crosshairMode || S.layer === 'sat') return; var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = 'transparent'; var info = block.info; var txt = '—'; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { txt = Math.round(block.dbz) + ' dBZ | ' + info.label; } else { txt = '≥' + info.v + ' dBZ | ' + info.label; } } else { txt = info.label; } } crosshairLbl.innerHTML = '<span class="ch-swatch" style="background:' + block.color + '"></span>' + txt; /* цвет данных — inline, рамка — токен темы */ crosshairLbl.style.display = 'block'; var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh; if (ly < 8) ly = cy + 50; crosshairLbl.style.left = lx + 'px'; crosshairLbl.style.top = ly + 'px'; } else { hoverEl.style.display = 'none'; crosshairLbl.innerHTML = '<span class="ch-nodata">' + (S.layer === 'dop' ? 'клик — скорость (м/с) в точке' : 'нет данных') + '</span>'; crosshairLbl.style.display = 'block'; crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px'; crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px'; } }
+  function updateCrosshair() { if (!crosshairMode || S.layer === 'sat') return; var cx = innerWidth / 2, cy = innerHeight / 2, block = getBlockAt(cx, cy); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = 'transparent'; var info = block.info; var txt = '—'; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { txt = Math.round(block.dbz) + ' dBZ | ' + info.label; } else { txt = '≥' + info.v + ' dBZ | ' + info.label; } } else { txt = info.label; } } crosshairLbl.innerHTML = '<span class="ch-swatch" style="background:' + block.color + '"></span>' + txt; /* цвет данных — inline, рамка — токен темы */ crosshairLbl.style.display = 'block'; var lw = crosshairLbl.offsetWidth || 200, lh = crosshairLbl.offsetHeight || 36, lx = cx - lw / 2, ly = cy - 50 - lh; if (ly < 8) ly = cy + 50; crosshairLbl.style.left = lx + 'px'; crosshairLbl.style.top = ly + 'px'; } else { hoverEl.style.display = 'none'; crosshairLbl.innerHTML = '<span class="ch-nodata">нет данных</span>'; crosshairLbl.style.display = 'block'; crosshairLbl.style.left = (innerWidth / 2 - (crosshairLbl.offsetWidth || 120) / 2) + 'px'; crosshairLbl.style.top = (innerHeight / 2 - 60) + 'px'; } }
   function toggleCrosshair() { crosshairMode = !crosshairMode; var btn = $('btn-crosshair'); if (crosshairMode) { btn.classList.add('on'); crosshairEl.style.display = 'block'; updateCrosshair(); } else { btn.classList.remove('on'); crosshairEl.style.display = 'none'; crosshairLbl.style.display = 'none'; hoverEl.style.display = 'none'; } if (S.ruler.active) toggleRuler(); }
   function showPopup(block, mx, my) { var info = block.info; var lbl = info ? escHtml(info.label) : '—'; var meta = ''; if (info) { if (S.layer === 'radar') { if (block.dbz >= 0) { meta = 'Слой: <b>Отражаемость</b><br>Значение: <b>' + Math.round(block.dbz) + '</b> dBZ<br>Категория: ' + info.label; } else { meta = 'Слой: <b>Отражаемость</b><br>Порог: ≥' + info.v + ' dBZ<br>Категория: ' + info.label; } } else { meta = 'Слой: <b>Явления</b><br>' + info.label; } } else { meta = 'Нет данных'; } popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + block.color + '"></div><div class="popup-label">' + lbl + '</div></div><div class="popup-meta">' + meta + '</div><span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>'; popupEl.style.display = 'block'; popupEl.classList.remove('popup-in'); void popupEl.offsetWidth; popupEl.classList.add('popup-in'); var px2 = mx + 16, py2 = my - 55; if (px2 + 230 > innerWidth - 8) px2 = mx - 246; if (py2 < 8) py2 = 8; if (py2 + 110 > innerHeight - 8) py2 = innerHeight - 118; popupEl.style.left = px2 + 'px'; popupEl.style.top = py2 + 'px'; popupVisible = true; }
   function hidePopup() { popupEl.style.display = 'none'; popupVisible = false; }
@@ -1984,7 +2406,7 @@
     var closeBtn = '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
     /* мгновенный отклик: попап со статусом, ответ подставим по готовности */
     popupEl.innerHTML = '<div class="popup-header"><div class="popup-label">⏳ Запрос явления…</div></div>' +
-      '<div class="popup-meta">ОЯ BUFR · nowcast.ru · кадр ' + t + ' МСК</div>' + closeBtn;
+      '<div class="popup-meta">ОЯ BUFR · 4x4 · кадр ' + t + ' МСК</div>' + closeBtn;
     placePopup(mx, my);
     var live = S.ts >= nowTs();
     var time = live ? null : satIso(S.ts); /* исторический кадр — тот же TIME, что у слоя */
@@ -2000,7 +2422,7 @@
       } else {
         lbl = WX_NC_CODES[best.code] || ('код ' + best.code);
         color = wxNcColorFor(best.code);
-        meta = 'Слой: <b>ОЯ BUFR</b> (nowcast.ru)<br>Станция: ' + escHtml(best.st.label) + '<br>Код явления: ' + best.code + '<br>Кадр: ' + t + ' МСК';
+        meta = 'Слой: <b>ОЯ BUFR</b> (4x4)<br>Станция: ' + escHtml(best.st.label) + '<br>Код явления: ' + best.code + '<br>Кадр: ' + t + ' МСК';
       }
       popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + color + '"></div><div class="popup-label">' + escHtml(lbl) + '</div></div>' +
         '<div class="popup-meta">' + meta + '</div>' + closeBtn;
@@ -2016,7 +2438,7 @@
     var t = new Date(S.ts * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
     var closeBtn = '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
     popupEl.innerHTML = '<div class="popup-header"><div class="popup-label">⏳ Запрос скорости…</div></div>' +
-      '<div class="popup-meta">Доплер ДМРЛ · nowcast.ru · ' + DOP_HEIGHTS[dopHeightIdx].label + '</div>' + closeBtn;
+      '<div class="popup-meta">Доплер ДМРЛ · 4x4 · ' + DOP_HEIGHTS[dopHeightIdx].label + '</div>' + closeBtn;
     placePopup(mx, my);
     var live = S.ts >= nowTs();
     var time = live ? null : satIso(S.ts);
@@ -2034,7 +2456,7 @@
         var dir = v < -1 ? 'к радару' : (v > 1 ? 'от радара' : 'поперёк луча');
         lbl = (v > 0 ? '+' : '') + v.toFixed(1) + ' м/с (' + dir + ')';
         color = v < -1 ? '#16a34a' : (v > 1 ? '#dc2626' : '#d1d5db'); /* цвета легенды доплера */
-        meta = 'Слой: <b>Радиальная скорость</b> (nowcast.ru)<br>Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + '<br>Код пикселя: ' + r.code + '<br>Кадр: ' + t + ' МСК';
+        meta = 'Слой: <b>Радиальная скорость</b> (4x4)<br>Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + '<br>Код пикселя: ' + r.code + '<br>Кадр: ' + t + ' МСК';
       }
       popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + color + '"></div><div class="popup-label">' + escHtml(lbl) + '</div></div>' +
         '<div class="popup-meta">' + meta + '</div>' + closeBtn;
@@ -2110,6 +2532,7 @@
       if (S.layer === 'sat') {
         satOpacityMem = val; /* сессионное значение спутника — переживает смену кадра/канала */
         if (eumetsatLayer) eumetsatLayer.setOpacity(val / 100);
+        if (prodWmsLayer) prodWmsLayer.setOpacity(val / 100); /* WMS-продукт COMPOSITE */
         satUpdateChip();
       } else {
         canvas.style.opacity = val / 100;
@@ -2304,6 +2727,27 @@
 
   /* Сбор строк легенды для канваса: {title, grad[], gradCaps[], rows[[css-цвет, подпись]], notes[]} */
   function collectLegendData() {
+    /* Грозовые продукты — своя легенда в экспорт-композите */
+    if (S.layer === 'sat' && satProduct) {
+      if (satProduct === 'composite') {
+        return { title: 'COMPOSITE · ОТРАЖАЕМОСТЬ dBZ', grad: null, gradCaps: null,
+          rows: BUILTIN_RADAR.map(function(e2) { return ['rgb(' + e2.r.join(',') + ')', e2.l]; }),
+          notes: ['Композит · 4x4 (' + COMPOSITE_REGIONS[compositeRegionIdx].label + ')'] };
+      }
+      if (satProduct === 'cape') {
+        return { title: 'CAPE · Дж/кг', grad: ['#4ade80', '#fde047', '#f97316', '#dc2626', '#a21caf'], gradCaps: ['100', '3000+'],
+          rows: [['#4ade80', '100–500'], ['#fde047', '500–1000'], ['#f97316', '1000–2000'], ['#dc2626', '2000–3000'], ['#a21caf', '>3000']],
+          notes: ['Модель Open-Meteo'] };
+      }
+      if (satProduct === 'cin') {
+        return { title: 'CIN · Дж/кг', grad: ['#93c5fd', '#3b82f6', '#1d4ed8', '#6b21a8'], gradCaps: ['15', '200+'],
+          rows: [['#93c5fd', '15–50'], ['#3b82f6', '50–100'], ['#1d4ed8', '100–200'], ['#6b21a8', '>200']],
+          notes: ['Модель Open-Meteo'] };
+      }
+      return { title: 'SUPERCELL · ОЦЕНКА', grad: null, gradCaps: null,
+        rows: [['#fde047', '1 — слабые условия'], ['#f97316', '2 — умеренные'], ['#dc2626', '3 — сильные']],
+        notes: ['CAPE + сдвиг ветра · оценка, не SCP NOAA · Open-Meteo'] };
+    }
     if (S.layer === 'sat') {
       var ch = SAT_CHANNELS[satChIdx];
       var out = { title: 'СПУТНИК · ' + ch.label.toUpperCase(), grad: null, gradCaps: null, rows: [], notes: [] };
@@ -2332,7 +2776,7 @@
     if (S.layer === 'dop') {
       return { title: 'ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ', grad: ['#0b2d7a', '#1d4ed8', '#16a34a', '#86efac', '#d1d5db', '#fde047', '#f97316', '#dc2626', '#7f1d1d'], gradCaps: ['−50 м/с (к радару)', '+50 (от радара)'],
         rows: [['#16a34a', 'К радару'], ['#d1d5db', '~0 (поперёк луча)'], ['#dc2626', 'От радара']],
-        notes: ['ДМРЛ · nowcast.ru · ' + DOP_HEIGHTS[dopHeightIdx].label] };
+        notes: ['ДМРЛ · 4x4 · ' + DOP_HEIGHTS[dopHeightIdx].label] };
     }
     var items = getCurrentPaletteItems();
     var o = { title: S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ', grad: null, gradCaps: null, rows: [], notes: [] };
@@ -2340,10 +2784,10 @@
       /* БЛОК A: в композит — фактическая палитра ОЯ-BUFR (как на экране) */
       o.title = 'ПОГОДНЫЕ ЯВЛЕНИЯ · BUFR';
       WX_NC_PALETTE.forEach(function(p) { o.rows.push([p[1], p[2]]); });
-      o.notes.push('nowcast.ru · станции: Москва/Новосибирск/Владивосток');
+      o.notes.push('4x4 · станции: Москва/Новосибирск/Владивосток');
       return o;
     }
-    if (S.layer === 'radar') o.notes.push(radarNcActive() ? 'Источник: nowcast.ru (ДМРЛ)' : 'Источник: rainradar.ru');
+    if (S.layer === 'radar') o.notes.push(radarNcActive() ? 'Источник: 4x4 (ДМРЛ)' : 'Источник: rainradar.ru');
     items.forEach(function(p) { o.rows.push(['rgb(' + p.r.join(',') + ')', p.l]); });
     try { var pl = palettes[S.layer]; var pn = pl.list[pl.activeIdx].name; if (pn) o.notes.push('Палитра: ' + pn); } catch (e) {}
     return o;
@@ -2461,8 +2905,20 @@
     renderBasemapToCanvas(octx);
     var missing = 0, total = 0;
     if (S.layer === 'sat') {
-      var sat = renderSatToCanvas();
-      if (sat) { octx.save(); octx.setTransform(1, 0, 0, 1, 0, 0); octx.globalAlpha = satOpacityMem / 100; octx.drawImage(sat.canvas, 0, 0); octx.restore(); total = sat.total; }
+      if (satProduct) {
+        /* Грозовой продукт вместо снимка: WMS-композит из тайлов, сетка — прямоугольниками */
+        var pdE = prodDef();
+        if (pdE.kind === 'wms' && prodWmsLayer) {
+          octx.save(); octx.globalAlpha = satOpacityMem / 100;
+          total = drawTileLayerTo(octx, prodWmsLayer);
+          octx.restore();
+        } else if (pdE.kind === 'grid') {
+          total = drawProdCells(octx);
+        }
+      } else {
+        var sat = renderSatToCanvas();
+        if (sat) { octx.save(); octx.setTransform(1, 0, 0, 1, 0, 0); octx.globalAlpha = satOpacityMem / 100; octx.drawImage(sat.canvas, 0, 0); octx.restore(); total = sat.total; }
+      }
     } else if (S.layer === 'dmrl') {
       /* маркеры+круги рисуются ниже общим вызовом (оверлей 📡 или слой dmrl) */
     } else if (S.layer === 'dop') {
@@ -2519,7 +2975,11 @@
       generator: 'Tatmeteo',
       frame_time_msk: new Date(S.ts * 1000).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }),
       layer: S.layer,
-      sat_channel: S.layer === 'sat' ? SAT_CHANNELS[satChIdx].id : undefined,
+      sat_channel: S.layer === 'sat' && !satProduct ? SAT_CHANNELS[satChIdx].id : undefined,
+      product: S.layer === 'sat' && satProduct ? satProduct : undefined,
+      product_source: S.layer === 'sat' && satProduct
+        ? (satProduct === 'composite' ? '4x4 (' + COMPOSITE_REGIONS[compositeRegionIdx].id + ')' : 'Open-Meteo (модель, час ' + ((prodGrid.times && prodGrid.times[prodGrid.hourIdx]) || '—') + ' UTC)')
+        : undefined,
       composite: isComposite ? true : undefined,
       basemap_theme: isComposite ? currentTheme : undefined,
       legend: isComposite ? true : undefined,       /* легенда встроена в пиксели композита */
@@ -2527,8 +2987,8 @@
       dmrl: (S.layer === 'dmrl' || dmrlOverlayOn) ? true : undefined,
       dmrl_range_km: (S.layer === 'dmrl' || dmrlOverlayOn) ? DMRL_RANGE_KM : undefined,
       doppler: S.layer === 'dop' ? true : undefined,
-      radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? 'nowcast.ru (' + (S.layer === 'wx' ? 'BUFR: ' + WX_NC_LAYERS.map(function(l) { return l.id; }).join(' + ') : RADAR_NC_LAYERS[radarNcIdx].id) + ')' : 'rainradar.ru') : undefined,
-      doppler_source: S.layer === 'dop' ? 'nowcast.ru — радиальная скорость ДМРЛ (' + DOP_HEIGHTS[dopHeightIdx].label + ')' : undefined,
+      radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? '4x4 (' + (S.layer === 'wx' ? 'BUFR: ' + WX_NC_LAYERS.map(function(l) { return l.id; }).join(' + ') : RADAR_NC_LAYERS[radarNcIdx].id) + ')' : 'rainradar.ru') : undefined,
+      doppler_source: S.layer === 'dop' ? '4x4 — радиальная скорость ДМРЛ (' + DOP_HEIGHTS[dopHeightIdx].label + ')' : undefined,
       legend_pos: isComposite ? LEGEND_POS : undefined,
       sat_backdrop: isComposite && satBackdropActive() ? 'dark_all под спутником' : undefined,
       zoom: map.getZoom(),
@@ -2666,7 +3126,7 @@
           var octx2 = oc.getContext('2d'); octx2.setTransform(DPR, 0, 0, DPR, 0, 0);
           var drawn = drawTileLayerTo(octx2, radarNcLayer);
           wxNcExtras.forEach(function(l) { drawn += drawTileLayerTo(octx2, l); }); /* станции ОЯ BUFR */
-          if (!drawn) { toast('Тайлы nowcast ещё не загружены'); return; }
+          if (!drawn) { toast('Тайлы 4x4 ещё не загружены'); return; }
           var rcN = { canvas: oc, missing: 0, total: drawn, w: W, h: H };
           var duN = oc.toDataURL('image/png');
           if (fmt === 'png') { downloadBlob(new Blob([dataUrlToU8(duN)], { type: 'image/png' }), base + '.png'); }
