@@ -789,7 +789,7 @@
     if (radarNcActive()) { /* dBZ с nowcast: рисует WMS-слой, канвас пуст */
       var liveNc = S.ts >= nowTs();
       var tNc = new Date((liveNc ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-      setChip('dBZ · nowcast (' + RADAR_NC_LAYERS[radarNcIdx].label + ') · ' + tNc + ' МСК' + (liveNc ? ' (LIVE)' : '') + (radarNcLoading ? ' · ⏳' : '') + (radarNcErr ? ' · ⚠️ ' + radarNcErr : '') + (!S.dbzVisible ? ' · слой скрыт' : '') + dmrlChipSuffix() + ltgChipSuffix());
+      setChip((S.layer === 'wx' ? 'ОЯ · nowcast (ДМРЛ явления)' : 'dBZ · nowcast (' + RADAR_NC_LAYERS[radarNcIdx].label + ')') + ' · ' + tNc + ' МСК' + (liveNc ? ' (LIVE)' : '') + (radarNcLoading ? ' · ⏳' : '') + (radarNcErr ? ' · ⚠️ ' + radarNcErr : '') + (!S.dbzVisible ? ' · слой скрыт' : '') + dmrlChipSuffix() + ltgChipSuffix());
       return;
     }
     if (S.layer === 'dop') { dopUpdateChip(); return; }
@@ -1161,10 +1161,12 @@
      пересекаются ни со спутником, ни с доплером). Канвас #radar здесь не используется. */
   var radarNcLayer = null, radarNcOld = null, radarNcSwapTmr = null;
   var radarNcLoading = false, radarNcErr = null, radarNcFails = 0;
-  function radarNcActive() { return S.layer === 'radar' && radarSource === 'nowcast'; }
+  /* Единый nowcast-режим для dBZ И ОЯ: один переключатель источника, один fallback */
+  function radarNcActive() { return (S.layer === 'radar' || S.layer === 'wx') && radarSource === 'nowcast'; }
   function createRadarNcLayer(ts) {
     var params = {
-      layers: RADAR_NC_LAYERS[radarNcIdx].id,
+      /* ОЯ Явления — bufr_phenomena; отражаемость — выбранные данные (ДМРЛ/FMI) */
+      layers: S.layer === 'wx' ? 'bufr_phenomena' : RADAR_NC_LAYERS[radarNcIdx].id,
       format: 'image/png',
       transparent: true,
       version: '1.1.1',
@@ -1187,6 +1189,7 @@
   var radarRecolorCache = new Map(), RADAR_RECOLOR_MAX = 150;
   function radarPalIsDefault() { return palettes.radar.activeIdx === 0; }
   function recolorRadarNcTile(tile) {
+    if (S.layer !== 'radar') return; /* у явлений nowcast своя раскраска — не перекрашиваем */
     if (radarPalIsDefault()) return;
     var pal = palettes.radar.list[palettes.radar.activeIdx];
     if (!pal || !pal.items || !pal.items.length) return;
@@ -1277,18 +1280,18 @@
     radarSource = src;
     radarSourceAuto = !!auto && src === 'rainradar';
     try { localStorage.setItem('radarSource', src); } catch (e) {}
-    if (S.layer !== 'radar') { buildLegend(); return; }
+    if (S.layer !== 'radar' && S.layer !== 'wx') { buildLegend(); return; }
     if (src === 'nowcast') {
       radarNcFails = 0; radarNcErr = null;
       fadeCanvas(false); /* канвас не нужен — рисует WMS-слой */
       radarNcApply(true);
-      if (!auto) toast('Радар: nowcast.ru (ДМРЛ)');
+      if (!auto) toast((S.layer === 'wx' ? 'Явления' : 'Радар') + ': nowcast.ru (ДМРЛ)');
     } else {
       radarNcRemove();
       fadeCanvas(true); /* обратно на канвас rainradar */
       S.cache.clear(); S.pending.clear(); S.failed.clear();
       schedRender();
-      if (!auto) toast('Радар: rainradar.ru');
+      if (!auto) toast((S.layer === 'wx' ? 'Явления' : 'Радар') + ': rainradar.ru');
     }
     buildLegend(); schedRender();
   }
@@ -1475,7 +1478,7 @@
       S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
       S.cache.clear(); S.pending.clear(); S.failed.clear();
       buildFrames();
-      if (radarNcActive()) { fadeCanvas(false); radarNcApply(true); } /* dBZ с nowcast: канвас не нужен */
+      if (radarNcActive()) { fadeCanvas(false); radarNcApply(true); } /* dBZ/ОЯ с nowcast: канвас не нужен */
       else forceRefresh();
     }
     dmrlSync();
@@ -1663,7 +1666,7 @@
       return;
     }
     var items = getCurrentPaletteItems(); var title = S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ'; setLegendTitle(title); 
-    var isRadarLegend = S.layer === 'radar';
+    var isRadarLegend = S.layer === 'radar' || S.layer === 'wx'; /* переключатель источника у обоих */
     items.forEach(function(p, i) { var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14)); var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + p.r + ')'; if (!p.r[0] && !p.r[1] && !p.r[2]) sq.style.border = '1px solid #555'; var t = document.createElement('span'); t.textContent = p.l; row.appendChild(sq); row.appendChild(t); el.appendChild(row); }); 
     if (isRadarLegend) {
       /* Переключатель источника радара: nowcast (ДМРЛ, основной) ↔ rainradar (запасной) */
@@ -1672,7 +1675,15 @@
       srcBtn.textContent = 'Источник: ' + (radarSource === 'nowcast' ? 'nowcast (ДМРЛ)' : 'rainradar');
       srcBtn.addEventListener('click', function() { setRadarSource(radarSource === 'nowcast' ? 'rainradar' : 'nowcast', false); });
       el.appendChild(srcBtn);
-      if (radarSource === 'nowcast') {
+      if (radarSource === 'nowcast' && S.layer === 'wx') {
+        var wxNote = document.createElement('div'); wxNote.className = 'li legend-note';
+        wxNote.textContent = 'Явления: bufr_phenomena (ДМРЛ) — цвета источника могут отличаться от палитры сайта';
+        el.appendChild(wxNote);
+        var wxNote2 = document.createElement('div'); wxNote2.className = 'li legend-note';
+        wxNote2.textContent = 'Точная палитра сайта и попапы — в режиме rainradar';
+        el.appendChild(wxNote2);
+      }
+      if (radarSource === 'nowcast' && S.layer === 'radar') {
         /* Выбор данных nowcast: станции ДМРЛ РФ или композит FMI (Европа) */
         var dataBtn = document.createElement('button');
         dataBtn.className = 'btn mini-btn';
@@ -2241,7 +2252,7 @@
       dmrl: (S.layer === 'dmrl' || dmrlOverlayOn) ? true : undefined,
       dmrl_range_km: (S.layer === 'dmrl' || dmrlOverlayOn) ? DMRL_RANGE_KM : undefined,
       doppler: S.layer === 'dop' ? true : undefined,
-      radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? 'nowcast.ru (' + RADAR_NC_LAYERS[radarNcIdx].id + ')' : 'rainradar.ru') : undefined,
+      radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? 'nowcast.ru (' + (S.layer === 'wx' ? 'bufr_phenomena' : RADAR_NC_LAYERS[radarNcIdx].id) + ')' : 'rainradar.ru') : undefined,
       doppler_source: S.layer === 'dop' ? 'nowcast.ru — радиальная скорость ДМРЛ (' + DOP_HEIGHTS[dopHeightIdx].label + ')' : undefined,
       legend_pos: isComposite ? LEGEND_POS : undefined,
       sat_backdrop: isComposite && satBackdropActive() ? 'dark_all под спутником' : undefined,
