@@ -1169,20 +1169,43 @@
 
   map.on('move', schedRender); map.on('movestart', function() { prevFrame.valid = false; }); map.on('moveend zoomend', function() { if (S.layer !== 'sat') S.failed.clear(); schedRender(); });
 
-  /* ═══ БЛОК C: грозопеленгатор (Blitzortung через /api/lightning) ═══
-     Вариант «оверлей-тумблер» (кнопка ⚡): молнии — самостоятельный слой ПОВЕРХ
-     любого выбранного (радар/ОЯ/спутник/карта) — именно так грозопеленгатор
-     полезнее всего (молнии поверх dBZ). Клиент ходит ТОЛЬКО на свой прокси. */
-  var ltg = { on: false, strikes: [], fetching: false, lastAt: 0, err: null, timer: null };
+  /* ═══ БЛОК C: грозопеленгатор (оверлей-тумблер ⚡): молнии — самостоятельный
+     слой ПОВЕРХ любого выбранного (радар/ОЯ/спутник/карта). ═══ */
+  /* ═══ Молнии: ПУБЛИЧНЫЙ WebSocket Blitzortung (без кредов и прокси).
+     Протокол (сверен живым подключением из этого проекта):
+       wss://ws1.blitzortung.org → в onopen шлём {"a":111} → сервер push'ит удары.
+     Сообщения СЖАТЫ символьным LZW (как на lightningmaps) → ltgLzwDecode().
+     Поля удара: time (наносекунды unix!), lat/lon (+ поправки latc/lonc — прибавить),
+     delay (задержка публикации, с), mds/status/sig — служебные.
+     api/lightning.js (Protected API с BLITZORTUNG_USER/PASS) больше НЕ вызывается. */
+  var ltg = { on: false, strikes: [], lastAt: 0, err: null, ws: null, wsTry: 0, wsTmr: null };
+  var LTG_WS_SERVERS = ['wss://ws1.blitzortung.org/', 'wss://ws7.blitzortung.org/', 'wss://ws8.blitzortung.org/'];
+  var ltgWsIdx = 0; /* при ошибке пробуем следующий сервер по кругу */
+  var LTG_MAX = 2000; /* лимит массива ударов — вытесняем самые старые */
   var ltgErrToastTs = 0;
   var ltgCanvas = $('ltg-canvas'), ltgCtx = ltgCanvas ? ltgCanvas.getContext('2d') : null;
+  /* Символьный LZW-декодер потока Blitzortung (портирован с официального клиента) */
+  function ltgLzwDecode(b) {
+    if (!b) return b;
+    var e = {}, c = b.charAt(0), f = c, g = [c], h = 256, o = h, a;
+    for (var i = 1; i < b.length; i++) {
+      a = b.charCodeAt(i);
+      a = h > a ? b.charAt(i) : (e[a] ? e[a] : f + c);
+      g.push(a);
+      c = a.charAt(0);
+      e[o] = f + c; o++;
+      f = a;
+    }
+    return g.join('');
+  }
   function resizeLtgCanvas() {
     if (!ltgCanvas) return;
     ltgCanvas.width = Math.round(innerWidth * DPR); ltgCanvas.height = Math.round(innerHeight * DPR);
     ltgCanvas.style.width = innerWidth + 'px'; ltgCanvas.style.height = innerHeight + 'px';
     drawLtg();
   }
-  /* Общая отрисовка (экран и экспорт-композит): контекст уже в CSS-пикселях (DPR-transform) */
+  /* Общая отрисовка (экран и экспорт-композит): контекст уже в CSS-пикселях (DPR-transform).
+     В композит идут ТОЛЬКО квадраты (кольца — живая анимация, в статике не нужна) */
   function drawLtgToCtx(c2) {
     var now = Date.now() / 1000;
     for (var i = 0; i < ltg.strikes.length; i++) {
@@ -1200,8 +1223,31 @@
     }
     c2.globalAlpha = 1;
   }
+  /* Кольцо-волна свежего удара (как в официальном клиенте): ~0.9с, только экран.
+     Отключается при reduced-motion/animPref off */
+  var ltgRings = []; /* [lat, lon, performance.now() рождения] */
+  function ltgRingAdd(lat, lon) {
+    if (REDUCE_MOTION) return;
+    ltgRings.push([lat, lon, performance.now()]);
+    if (ltgRings.length > 60) ltgRings.shift(); /* при шторме не копим лавину колец */
+  }
+  function drawLtgRings(c2) {
+    if (!ltgRings.length) return;
+    var now = performance.now(), alive = [];
+    for (var i = 0; i < ltgRings.length; i++) {
+      var r = ltgRings[i], k = (now - r[2]) / 900;
+      if (k >= 1) continue;
+      var pt = map.latLngToContainerPoint([r[0], r[1]]);
+      c2.beginPath(); c2.arc(pt.x, pt.y, 4 + k * 26, 0, Math.PI * 2);
+      c2.strokeStyle = 'rgba(255,255,255,' + (0.8 * (1 - k)).toFixed(3) + ')';
+      c2.lineWidth = 1.5; c2.stroke();
+      alive.push(r);
+    }
+    ltgRings = alive;
+    if (ltgRings.length) drawLtg(); /* анимация продолжается, пока живы кольца */
+  }
   var ltgDrawPend = false;
-  function drawLtg() { /* rAF-троттлинг перерисовки при панорамировании */
+  function drawLtg() { /* rAF-троттлинг перерисовки при панорамировании/потоке */
     if (!ltgCtx || ltgDrawPend) return;
     ltgDrawPend = true;
     requestAnimationFrame(function() {
@@ -1209,46 +1255,109 @@
       ltgCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ltgCtx.clearRect(0, 0, innerWidth, innerHeight);
       if (ltg.on && ltg.strikes.length) drawLtgToCtx(ltgCtx);
+      if (ltg.on) drawLtgRings(ltgCtx);
     });
   }
   function ltgChipSuffix() {
     if (!ltg.on) return '';
-    if (ltg.err) return ' · ⚡ недоступно';
-    var t = ltg.lastAt ? new Date(ltg.lastAt).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
-    return ' · ⚡' + ltg.strikes.length + ' (обн. ' + t + ')';
+    if (ltg.err) return ' · ⚡ нет соединения';
+    if (!ltg.ws || ltg.ws.readyState !== 1) return ' · ⚡ подключение…';
+    var sfx = ' · ⚡' + ltg.strikes.length;
+    if (ltg.strikes.length) { /* возраст самого свежего удара — видно, что поток живой */
+      var ago = Math.max(0, Math.round(Date.now() / 1000 - ltg.strikes[ltg.strikes.length - 1][2]));
+      sfx += ' · ' + (ago < 60 ? ago + 'с' : Math.round(ago / 60) + ' мин') + ' назад';
+    }
+    return sfx;
   }
-  function fetchLtg(manual) {
-    if (!ltg.on || ltg.fetching) return;
-    ltg.fetching = true; bumpLoad(1);
+  /* Троттлинг обновления чипа: при грозе push идёт очередями, чип чаще 1с не дёргаем */
+  var ltgUiTs = 0;
+  function ltgUiKick() {
+    var now = Date.now();
+    if (now - ltgUiTs < 1000) return;
+    ltgUiTs = now;
+    schedRender(); if (S.layer === 'sat') satUpdateChip();
+  }
+  /* ── Приём удара: decode → поправки latc/lonc → фильтр по видимой области +15% ── */
+  function ltgOnMsg(raw) {
+    var d;
+    try { d = JSON.parse(String(raw)); }
+    catch (e) { try { d = JSON.parse(ltgLzwDecode(String(raw))); } catch (e2) { return; } }
+    if (!d || typeof d !== 'object') return;
+    if ('timeout' in d) { ltgUiKick(); return; } /* служебное «молчание» — не ошибка */
+    if (!('lat' in d) || !('lon' in d) || !('time' in d)) return;
+    var lat = +d.lat + (+d.latc || 0), lon = +d.lon + (+d.lonc || 0);
+    /* time приходит в НАНОсекундах unix; страхуемся от мс/с */
+    var tSec = d.time > 1e15 ? d.time / 1e9 : (d.time > 1e12 ? d.time / 1000 : +d.time);
+    ltg.lastAt = Date.now(); ltg.err = null;
     var b = map.getBounds().pad(0.15); /* +15% за краями — удары появляются «заранее» */
-    fetch('/api/lightning?minLat=' + b.getSouth().toFixed(3) + '&maxLat=' + b.getNorth().toFixed(3) +
-          '&minLon=' + b.getWest().toFixed(3) + '&maxLon=' + b.getEast().toFixed(3) + '&minutes=30', { cache: 'no-store' })
-      .then(function(r) { if (!r.ok) return r.json().then(function(j) { throw new Error(j.error || ('HTTP ' + r.status)); }); return r.json(); })
-      .then(function(d) { ltg.strikes = d.strikes || []; ltg.err = null; ltg.lastAt = Date.now(); })
-      .catch(function(e) {
-        ltg.err = String(e.message || e);
-        console.warn('[ltg] ошибка:', ltg.err);
-        if (manual || Date.now() - ltgErrToastTs > 60000) { ltgErrToastTs = Date.now(); toast('⚡ Молнии недоступны: ' + ltg.err); }
-      })
-      .then(function() { ltg.fetching = false; bumpLoad(-1); drawLtg(); schedRender(); if (S.layer === 'sat') satUpdateChip(); });
+    if (lat < b.getSouth() || lat > b.getNorth() || lon < b.getWest() || lon > b.getEast()) return;
+    ltg.strikes.push([lat, lon, tSec, +d.delay || 0]);
+    if (ltg.strikes.length > LTG_MAX) ltg.strikes.splice(0, ltg.strikes.length - LTG_MAX);
+    ltgRingAdd(lat, lon);
+    drawLtg(); ltgUiKick();
+  }
+  /* ── Жизненный цикл WS: открытие, вежливое закрытие, reconnect с backoff ── */
+  function ltgWsOpen() {
+    if (!ltg.on || ltg.ws) return;
+    var url = LTG_WS_SERVERS[ltgWsIdx % LTG_WS_SERVERS.length];
+    var ws;
+    try { ws = new WebSocket(url); } catch (e) { ltgWsRetry(); return; }
+    ltg.ws = ws;
+    ws.onopen = function() {
+      ltg.wsTry = 0; ltg.err = null;
+      try { ws.send('{"a":111}'); } catch (e) {} /* приветствие протокола Blitzortung */
+      schedRender(); if (S.layer === 'sat') satUpdateChip();
+    };
+    ws.onmessage = function(evt) { ltgOnMsg(evt.data); };
+    ws.onerror = function() { /* детали придут в onclose */ };
+    ws.onclose = function() {
+      if (ltg.ws !== ws) return; /* уже заменён/закрыт нами */
+      ltg.ws = null;
+      if (ltg.on && document.visibilityState !== 'hidden') ltgWsRetry();
+    };
+  }
+  function ltgWsRetry() {
+    clearTimeout(ltg.wsTmr);
+    ltg.wsTry++;
+    ltgWsIdx++; /* следующая попытка — другой сервер пула */
+    /* Экспоненциальный backoff: 1с → 2с → 4с → … → 30с */
+    var delay = Math.min(30000, 1000 * Math.pow(2, Math.min(ltg.wsTry - 1, 5)));
+    if (ltg.wsTry >= 4) { /* ~30с без связи — честный статус, тост с троттлингом */
+      ltg.err = 'нет соединения';
+      if (Date.now() - ltgErrToastTs > 60000) { ltgErrToastTs = Date.now(); toast('⚡ Молнии: нет соединения, переподключаюсь…'); }
+      schedRender(); if (S.layer === 'sat') satUpdateChip();
+    }
+    ltg.wsTmr = setTimeout(function() { if (ltg.on) ltgWsOpen(); }, delay);
+  }
+  function ltgWsClose() {
+    clearTimeout(ltg.wsTmr); ltg.wsTmr = null;
+    var ws = ltg.ws; ltg.ws = null;
+    if (ws) {
+      try { if (ws.readyState === 1) ws.send('{"send":false}'); } catch (e) {} /* вежливое прощание (как в официальном клиенте) */
+      try { ws.onclose = null; ws.close(); } catch (e) {}
+    }
   }
   function setLtg(on, silent) {
     ltg.on = !!on;
     var btn = $('btn-ltg'); if (btn) btn.classList.toggle('on', ltg.on);
-    clearInterval(ltg.timer); ltg.timer = null;
     if (ltg.on) {
-      fetchLtg(!silent);
-      /* poll каждые 20с; в фоне вкладки — пауза (visibilitychange ниже) */
-      ltg.timer = setInterval(function() { if (document.visibilityState !== 'hidden') fetchLtg(); }, 20000);
-      if (!silent) toast('⚡ Грозопеленгатор включён (обновление ~20с)');
+      ltg.wsTry = 0; ltg.err = null;
+      ltgWsOpen();
+      if (!silent) toast('⚡ Грозопеленгатор включён (Blitzortung, real-time)');
     } else {
-      ltg.strikes = []; ltg.err = null; drawLtg();
+      ltgWsClose();
+      ltg.strikes = []; ltg.err = null; ltgRings = []; drawLtg();
       if (!silent) toast('⚡ Грозопеленгатор выключен');
     }
     buildLegend(); schedRender(); if (S.layer === 'sat') satUpdateChip();
     saveViewDebounced();
   }
-  document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'visible' && ltg.on) fetchLtg(); });
+  /* Скрытая вкладка: соединение закрываем (экономим трафик серверу и себе), при возврате — заново */
+  document.addEventListener('visibilitychange', function() {
+    if (!ltg.on) return;
+    if (document.visibilityState === 'hidden') ltgWsClose();
+    else { ltg.wsTry = 0; ltgWsOpen(); }
+  });
   map.on('move', drawLtg); map.on('zoomend', drawLtg);
   if ($('btn-ltg')) $('btn-ltg').addEventListener('click', function() { setLtg(!ltg.on); });
   resizeLtgCanvas();
@@ -1635,7 +1744,7 @@
       toast(satProduct ? 'Продукт обновлён' : 'Спутник обновлён'); 
       return; 
     }
-    if (ltg.on) fetchLtg(true); /* ↻ обновляет и молнии */
+    if (ltg.on && (!ltg.ws || ltg.ws.readyState !== 1)) { ltg.wsTry = 0; ltgWsClose(); ltgWsOpen(); } /* ↻ пересоединяет молнии, если WS упал */
     if (S.layer === 'dop') { /* ↻ доплера: свежий LIVE-кадр nowcast или пересчёт модели */
       setTime(nowTs(), false); buildFrames(); updHUD(); nowcastFails = 0; nowcastErr = null; nowcastApplyTime(true);
       toast('Доплер обновлён');
@@ -1870,10 +1979,12 @@
     if (!ltg.on) return;
     var row = document.createElement('div'); row.className = 'li';
     var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = '#ffd400';
-    var t = document.createElement('span'); t.textContent = '⚡ Удар молнии (за 30 мин)';
+    var t = document.createElement('span'); t.textContent = '⚡ Удар молнии (Blitzortung, real-time)';
     row.appendChild(sq); row.appendChild(t); el.appendChild(row);
-    var n = document.createElement('div'); n.className = 'li legend-note'; n.textContent = 'Свежие ярче, старше 10 мин скрываются';
+    var n = document.createElement('div'); n.className = 'li legend-note'; n.textContent = 'Push по WebSocket · с момента включения · старше 10 мин скрываются';
     el.appendChild(n);
+    var n2 = document.createElement('div'); n2.className = 'li legend-note'; n2.textContent = 'Клик по молнии — время/координаты удара';
+    el.appendChild(n2);
   }
   function setLegendTitle(t) { var el = $('ltitle'); if (el.textContent !== t) { el.textContent = t; retrig(el, 'title-swap'); } }
   function buildLegend() { 
@@ -2342,7 +2453,30 @@
   }
 
   map.on('mousemove', function(e) { if (crosshairMode) { requestAnimationFrame(updateCrosshair); return; } if (S.layer === 'sat') return; var p = e.containerPoint, block = getBlockAt(p.x, p.y); if (block) { hoverEl.style.display = 'block'; hoverEl.style.left = block.sx + 'px'; hoverEl.style.top = block.sy + 'px'; hoverEl.style.width = block.sw + 'px'; hoverEl.style.height = block.sh + 'px'; hoverEl.style.background = block.color; } else hoverEl.style.display = 'none'; });
-  map.on('click', function(e) { if (S.ruler.active || S.layer === 'sat') return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint; var ll = crosshairMode ? map.containerPointToLatLng(L.point(p.x, p.y)) : e.latlng; if (S.layer === 'dop') { dopShowPopup(ll, p.x, p.y); return; } /* доплер: скорость в точке */ if (S.layer === 'wx' && radarNcActive()) { /* БЛОК A: тип явления в точке — через GetFeatureInfo */ wxNcShowPopup(ll, p.x, p.y); return; } var block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
+  /* ─── Попап молнии: ближайший удар в радиусе ~10px от клика ─── */
+  function ltgFindNear(px, py) {
+    if (!ltg.on || !ltg.strikes.length) return null;
+    var best = null, bd = 100, now = Date.now() / 1000; /* 10px² */
+    for (var i = ltg.strikes.length - 1; i >= 0; i--) {
+      var st = ltg.strikes[i];
+      if (now - st[2] > 600) break; /* дальше только старше (массив упорядочен по времени) */
+      var pt = map.latLngToContainerPoint([st[0], st[1]]);
+      var dx = pt.x - px, dy = pt.y - py, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = st; }
+    }
+    return best;
+  }
+  function ltgShowPopup(st, mx, my) {
+    var now = Date.now() / 1000, age = Math.max(0, Math.round(now - st[2]));
+    var ageTxt = age < 60 ? age + ' с назад' : Math.round(age / 60) + ' мин назад';
+    var t = new Date(st[2] * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Moscow' });
+    var closeBtn = '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+    popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:#ffd400"></div><div class="popup-label">⚡ Удар молнии</div></div>' +
+      '<div class="popup-meta">Время: <b>' + t + '</b> МСК (' + ageTxt + ')<br>Координаты: ' + st[0].toFixed(3) + ', ' + st[1].toFixed(3) +
+      (st[3] ? '<br>Задержка публикации: ' + st[3].toFixed(1) + ' с' : '') + '<br>Источник: Blitzortung</div>' + closeBtn;
+    placePopup(mx, my);
+  }
+  map.on('click', function(e) { if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint; var stLtg = ltgFindNear(p.x, p.y); if (stLtg) { ltgShowPopup(stLtg, p.x, p.y); return; } /* молнии кликабельны поверх ЛЮБОГО слоя, включая спутник */ if (S.layer === 'sat') return; var ll = crosshairMode ? map.containerPointToLatLng(L.point(p.x, p.y)) : e.latlng; if (S.layer === 'dop') { dopShowPopup(ll, p.x, p.y); return; } /* доплер: скорость в точке */ if (S.layer === 'wx' && radarNcActive()) { /* БЛОК A: тип явления в точке — через GetFeatureInfo */ wxNcShowPopup(ll, p.x, p.y); return; } var block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
 
   var modal = $('palette-modal'), modalClose = $('modal-close'), modalTabs = document.querySelectorAll('.modal-tabs button'), paletteListContainer = $('palette-list-container'), loadPaletteBtn = $('load-palette-btn'), fileInput = $('file-input'), createPaletteBtn = $('create-palette-btn'), deletePaletteBtn = $('delete-palette-btn'), exportPaletteBtn = $('export-palette-btn'), createForm = $('create-form'), newPalName = $('new-pal-name'), entryVal = $('entry-val'), entryColor = $('entry-color'), entryLabel = $('entry-label'), addEntryBtn = $('add-entry-btn'), entriesList = $('entries-list'), savePaletteBtn = $('save-palette-btn'), cancelCreateBtn = $('cancel-create-btn');
   var currentLayerForModal = 'radar'; var tempEntries = []; var editingIndex = -1; var editingEntryIndex = -1;
