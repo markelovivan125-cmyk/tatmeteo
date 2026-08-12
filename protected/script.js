@@ -592,7 +592,6 @@
     canvas.style.width = innerWidth + 'px';
     canvas.style.height = innerHeight + 'px';
     if (typeof resizeLtgCanvas === 'function') resizeLtgCanvas(); /* канвас молний — тем же размером */
-    if (typeof resizeDopCanvas === 'function') resizeDopCanvas(); /* канвас ветра */
     updThumb(); schedRender();
   }
   addEventListener('resize', resizeCanvas); resizeCanvas();
@@ -1030,140 +1029,18 @@
     });
   }
 
-  /* ═══ БЛОК D: «Доплер» — модельная скорость ветра (Open-Meteo, 10 м) ═══
-     ЧЕСТНО: это НЕ радиальная скорость ДМРЛ — открытых доплеровских продуктов
-     по РФ нет (meteorad закрыт). При появлении доступа реальный доплер добавляется
-     сюда: слой-источник вместо fetchWindGrid. Open-Meteo: CORS *, без ключа. */
-  var dop = { on: false, cache: new Map(), points: [], lastAt: 0, err: null, timer: null, gen: 0, ctrl: null, fetching: false };
-  var dopCanvas = $('dop-canvas'), dopCtx = dopCanvas ? dopCanvas.getContext('2d') : null;
-  function resizeDopCanvas() {
-    if (!dopCanvas) return;
-    dopCanvas.width = Math.round(innerWidth * DPR); dopCanvas.height = Math.round(innerHeight * DPR);
-    dopCanvas.style.width = innerWidth + 'px'; dopCanvas.style.height = innerHeight + 'px';
-    drawDop();
-  }
-  /* Шкала скорости (км/ч) — по метео-градациям (слабый/умеренный/сильный/шторм) */
-  var DOP_STOPS = [
-    { v: 50, c: '#9c27b0', l: '> 50 — шторм' },
-    { v: 30, c: '#f4511e', l: '30–50 — сильный' },
-    { v: 15, c: '#e6c84f', l: '15–30 — умеренный' },
-    { v: 5,  c: '#56b06a', l: '5–15 — слабый' },
-    { v: 0,  c: 'rgba(150,150,155,0.8)', l: '0–5 — штиль' }
-  ];
-  function dopColor(sp) { for (var i = 0; i < DOP_STOPS.length; i++) if (sp >= DOP_STOPS[i].v) return DOP_STOPS[i].c; return DOP_STOPS[DOP_STOPS.length - 1].c; }
-  /* Сетка точек по видимой области: шаг зависит от зума, потолок ~140 точек */
-  function dopGrid() {
-    var z = map.getZoom(), b = map.getBounds();
-    var step = z >= 8 ? 0.5 : (z >= 7 ? 0.75 : (z >= 6 ? 1 : (z >= 5 ? 2 : 3)));
-    var pts = [];
-    var lat0 = Math.floor(b.getSouth() / step) * step, lat1 = Math.ceil(b.getNorth() / step) * step;
-    var lon0 = Math.floor(b.getWest() / step) * step, lon1 = Math.ceil(b.getEast() / step) * step;
-    for (var la = lat0; la <= lat1; la += step) {
-      for (var lo = lon0; lo <= lon1; lo += step) {
-        pts.push([+la.toFixed(2), +lo.toFixed(2)]);
-        if (pts.length >= 140) return pts;
-      }
-    }
-    return pts;
-  }
-  function fetchWindGrid(force) {
-    if (!dop.on) return;
-    var gen = ++dop.gen;
-    if (dop.ctrl) dop.ctrl.abort(); /* отменяем прошлую волну при новом moveend */
-    var pts = dopGrid();
-    dop.points = pts;
-    var now = Date.now();
-    var need = pts.filter(function(p) {
-      var c = dop.cache.get(p[0] + ',' + p[1]);
-      return force || !c || (now - c.t) > 15 * 60 * 1000; /* TTL 15 мин */
-    });
-    if (!need.length) { drawDop(); schedRender(); return; }
-    dop.fetching = true; bumpLoad(1);
-    dop.ctrl = new AbortController();
-    /* Open-Meteo принимает списки координат — одна волна = 1-3 запроса по 50 точек */
-    var batches = [];
-    for (var i = 0; i < need.length; i += 50) batches.push(need.slice(i, i + 50));
-    Promise.all(batches.map(function(batch) {
-      var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + batch.map(function(p) { return p[0]; }).join(',') +
-        '&longitude=' + batch.map(function(p) { return p[1]; }).join(',') +
-        '&current=wind_speed_10m,wind_direction_10m';
-      return fetch(url, { signal: dop.ctrl.signal }).then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      }).then(function(j) {
-        var arr = Array.isArray(j) ? j : [j]; /* одна точка приходит объектом */
-        arr.forEach(function(rec, k) {
-          if (!rec || !rec.current) return;
-          dop.cache.set(batch[k][0] + ',' + batch[k][1], { sp: +rec.current.wind_speed_10m || 0, dir: +rec.current.wind_direction_10m || 0, t: now });
-        });
-      });
-    })).then(function() {
-      if (gen !== dop.gen) return; /* устаревшая волна */
-      dop.err = null; dop.lastAt = Date.now();
-    }).catch(function(e) {
-      if (e.name === 'AbortError') return;
-      dop.err = String(e.message || e);
-      console.warn('[dop] Open-Meteo:', dop.err);
-      toast('🌀 Ветер недоступен: ' + dop.err);
-    }).then(function() {
-      dop.fetching = false; bumpLoad(-1);
-      drawDop(); schedRender();
-    });
-  }
-  /* Стрелка: фиксированная длина + цвет по скорости (длина-по-скорости при плотной
-     сетке превращается в кашу; цвет считывается мгновенно). Метео-направление —
-     ОТКУДА дует; рисуем «куда» (dir+180°) — указано в легенде. */
-  function drawDopToCtx(c2) {
-    var L2 = 14;
-    for (var i = 0; i < dop.points.length; i++) {
-      var p = dop.points[i], rec = dop.cache.get(p[0] + ',' + p[1]);
-      if (!rec) continue;
-      var pt = map.latLngToContainerPoint([p[0], p[1]]);
-      if (pt.x < -20 || pt.x > innerWidth + 20 || pt.y < -20 || pt.y > innerHeight + 20) continue;
-      var ang = (rec.dir + 180) * Math.PI / 180; /* куда дует; 0° = север, по часовой */
-      c2.save();
-      c2.translate(pt.x, pt.y);
-      c2.rotate(ang);
-      /* тёмная подложка-обводка + цветная стрелка */
-      for (var pass = 0; pass < 2; pass++) {
-        c2.strokeStyle = pass === 0 ? 'rgba(0,0,0,0.55)' : dopColor(rec.sp);
-        c2.lineWidth = pass === 0 ? 4 : 2;
-        c2.lineCap = 'round';
-        c2.beginPath();
-        c2.moveTo(0, L2 / 2); c2.lineTo(0, -L2 / 2);            /* древко (вверх = куда) */
-        c2.moveTo(-3.5, -L2 / 2 + 5); c2.lineTo(0, -L2 / 2);    /* наконечник */
-        c2.lineTo(3.5, -L2 / 2 + 5);
-        c2.stroke();
-      }
-      c2.restore();
-    }
-  }
-  var dopDrawPend = false;
-  function drawDop() {
-    if (!dopCtx || dopDrawPend) return;
-    dopDrawPend = true;
-    requestAnimationFrame(function() {
-      dopDrawPend = false;
-      dopCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      dopCtx.clearRect(0, 0, innerWidth, innerHeight);
-      if (dop.on) drawDopToCtx(dopCtx);
-    });
-  }
+  /* ═══ БЛОК D: «Доплер» — ТОЛЬКО радиальная скорость ДМРЛ (nowcast.ru).
+     Модельный контур Open-Meteo удалён: доплер обязан показывать реальные
+     радарные данные; при недоступности nowcast — честная ошибка в чипе,
+     без подмены модельным ветром. ═══ */
+  var dop = { on: false };
+  try { localStorage.removeItem('dopSource'); } catch (e) {} /* чистим ключ удалённого переключателя */
   function dopUpdateChip() {
     var hh = ' · ' + DOP_HEIGHTS[dopHeightIdx].label;
-    if (dopSource === 'nowcast') {
-      var live = S.ts >= nowTs();
-      var tstr = new Date((live ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-      setChip('🌀 Доплер ДМРЛ (nowcast.ru)' + hh + ' · ' + tstr + ' МСК' + (live ? ' (LIVE)' : '') + (nowcastLoading ? ' · ⏳' : '') + (nowcastErr ? ' · ⚠️ ' + nowcastErr : '') + dmrlChipSuffix() + ltgChipSuffix());
-      return;
-    }
-    var n = 0;
-    for (var i = 0; i < dop.points.length; i++) if (dop.cache.has(dop.points[i][0] + ',' + dop.points[i][1])) n++;
-    var t = dop.lastAt ? new Date(dop.lastAt).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }) : '—';
-    setChip('🌀 ветер · МОДЕЛЬ Open-Meteo (10 м) · ' + n + ' точек · обн. ' + t + (dop.fetching ? ' · ⏳' : '') + (dop.err ? ' · ⚠️' : '') + dmrlChipSuffix() + ltgChipSuffix());
+    var live = S.ts >= nowTs();
+    var tstr = new Date((live ? nowTs() : S.ts) * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+    setChip('🌀 Доплер ДМРЛ (nowcast.ru)' + hh + ' · ' + tstr + ' МСК' + (live ? ' (LIVE)' : '') + (nowcastLoading ? ' · ⏳' : '') + (nowcastErr ? ' · ⚠️ ' + nowcastErr : '') + dmrlChipSuffix() + ltgChipSuffix());
   }
-  var dopMoveTmr = null;
-  function dopOnMoveEnd() { if (!dop.on || dopSource !== 'model') return; clearTimeout(dopMoveTmr); dopMoveTmr = setTimeout(function() { fetchWindGrid(false); }, 500); }
 
   /* ═══ Настоящий доплер: WMS nowcast.ru через /api/nowcastProxy ═══
      Класс слоя ПЕРЕИСПОЛЬЗУЕМ: SatWMS не привязан к EUMETSAT — его createTile
@@ -1177,10 +1054,6 @@
     { id: 'bufr_vel4', label: '4 км' }
   ];
   var dopHeightIdx = 0;
-  /* Источник: 'nowcast' (реальный ДМРЛ) | 'model' (Open-Meteo, запасной).
-     Переключается вручную в легенде и автоматически при отказе nowcast. */
-  var dopSource = 'nowcast';
-  try { var dsv = localStorage.getItem('dopSource'); if (dsv === 'model' || dsv === 'nowcast') dopSource = dsv; } catch (e) {}
   var nowcastLayer = null, nowcastOld = null, nowcastLoading = false, nowcastErr = null, nowcastFails = 0, nowcastSwapTmr = null;
 
   function createNowcastLayer(ts) {
@@ -1206,11 +1079,11 @@
     lyr.on('tileerror', function() {
       if (lyr !== nowcastLayer) return;
       nowcastFails++;
-      if (nowcastFails >= 6 && dopSource === 'nowcast') {
-        /* nowcast лежит/недоступен из региона → честный авто-fallback на модель */
-        nowcastErr = 'nowcast недоступен';
-        toast('🌀 Доплер (nowcast) недоступен — переключаюсь на модель Open-Meteo');
-        setDopSource('model', true);
+      if (nowcastFails >= 6) {
+        /* Модельного fallback больше нет: показываем честную ошибку. */
+        nowcastErr = 'nowcast недоступен — нажмите ↻';
+        nowcastLoading = false; $('pulse').classList.remove('busy'); dopUpdateChip();
+        if (Date.now() - satErrToastTs > 30000) { satErrToastTs = Date.now(); toast('⚠️ Доплер (nowcast) недоступен'); }
       } else if (nowcastFails >= 3) {
         nowcastErr = 'ошибки тайлов'; nowcastLoading = false; $('pulse').classList.remove('busy'); dopUpdateChip();
       }
@@ -1218,10 +1091,10 @@
   }
   /* Смена кадра/высоты: новый слой поверх, старый снимаем после загрузки (как satApplyTime) */
   function nowcastApplyTime(immediate) {
-    if (S.layer !== 'dop' || dopSource !== 'nowcast') return;
+    if (S.layer !== 'dop') return;
     clearTimeout(nowcastSwapTmr);
     nowcastSwapTmr = setTimeout(function() {
-      if (S.layer !== 'dop' || dopSource !== 'nowcast') return;
+      if (S.layer !== 'dop') return;
       var live = S.ts >= nowTs();
       var old = nowcastLayer;
       if (nowcastOld && map.hasLayer(nowcastOld)) { map.removeLayer(nowcastOld); nowcastOld = null; }
@@ -1244,50 +1117,26 @@
     if (nowcastOld) { if (map.hasLayer(nowcastOld)) map.removeLayer(nowcastOld); nowcastOld = null; }
     nowcastLoading = false; nowcastErr = null; nowcastFails = 0;
   }
-  function setDopSource(src, keepOn) {
-    dopSource = src;
-    try { localStorage.setItem('dopSource', src); } catch (e) {}
-    if (!dop.on && !keepOn) return;
-    /* Переключение на лету: убрать один источник, включить другой */
-    if (src === 'nowcast') {
-      if (dop.ctrl) dop.ctrl.abort();
-      dop.points = []; drawDop();
-      nowcastFails = 0; nowcastErr = null;
-      nowcastApplyTime(true);
-    } else {
-      nowcastRemove();
-      fetchWindGrid(true);
-    }
-    buildLegend(); dopUpdateChip();
-  }
   function setDopHeight(idx) {
     if (idx < 0 || idx >= DOP_HEIGHTS.length || idx === dopHeightIdx) return;
     dopHeightIdx = idx;
     document.querySelectorAll('#dopheight-dropdown .dd-item').forEach(function(it, i) { it.classList.toggle('active', i === idx); });
     var b = $('btn-dopheight'); if (b) b.textContent = 'Высота: ' + DOP_HEIGHTS[idx].label;
-    if (dop.on && dopSource === 'nowcast') nowcastApplyTime(true);
+    if (dop.on) nowcastApplyTime(true);
     toast('🌀 Радиальная скорость на ' + DOP_HEIGHTS[idx].label);
   }
 
   function dopStart() {
     if (dop.on) return;
     dop.on = true;
-    var hw = $('dopheight-wrapper'); if (hw) hw.style.display = dopSource === 'nowcast' ? 'block' : 'none';
-    if (dopSource === 'nowcast') { nowcastFails = 0; nowcastApplyTime(true); }
-    else {
-      fetchWindGrid(false);
-      dop.timer = setInterval(function() { if (document.visibilityState !== 'hidden' && dop.on && dopSource === 'model') fetchWindGrid(true); }, 15 * 60 * 1000);
-    }
+    var hw = $('dopheight-wrapper'); if (hw) hw.style.display = 'block';
+    nowcastFails = 0; nowcastApplyTime(true);
   }
   function dopStop() {
     if (!dop.on) return;
     dop.on = false;
-    clearInterval(dop.timer); dop.timer = null;
-    if (dop.ctrl) dop.ctrl.abort();
-    dop.points = [];
     nowcastRemove();
     var hw = $('dopheight-wrapper'); if (hw) hw.style.display = 'none';
-    drawDop();
   }
   /* Дропдаун высоты радиальной скорости (1–4 км) */
   (function initDopHeightUI() {
@@ -1305,9 +1154,6 @@
     btn.addEventListener('click', function(e) { e.stopPropagation(); dd.classList.toggle('visible'); });
     document.addEventListener('click', function(e) { if (!$('dopheight-wrapper').contains(e.target)) dd.classList.remove('visible'); });
   })();
-  map.on('moveend zoomend', dopOnMoveEnd);
-  map.on('move', drawDop);
-  resizeDopCanvas();
 
   /* ═══ БЛОК A: радар dBZ с nowcast.ru (основной источник) ═══
      Слой — тот же переиспользуемый SatWMS через /api/nowcastProxy (пул ≤6,
@@ -1481,8 +1327,7 @@
     }
     if (ltg.on) fetchLtg(true); /* ↻ обновляет и молнии */
     if (S.layer === 'dop') { /* ↻ доплера: свежий LIVE-кадр nowcast или пересчёт модели */
-      if (dopSource === 'nowcast') { setTime(nowTs(), false); buildFrames(); updHUD(); nowcastApplyTime(true); }
-      else fetchWindGrid(true);
+      setTime(nowTs(), false); buildFrames(); updHUD(); nowcastFails = 0; nowcastErr = null; nowcastApplyTime(true);
       toast('Доплер обновлён');
       return;
     }
@@ -1584,7 +1429,7 @@
         S.manualTime = false; S.ts = nowTs();
         buildFrames(); updHUD();
         dopStart();
-        toast(dopSource === 'nowcast' ? '🌀 Доплер: радиальная скорость ДМРЛ (nowcast.ru)' : '🌀 Доплер: модельный ветер Open-Meteo');
+        toast('🌀 Доплер: радиальная скорость ДМРЛ (nowcast.ru)');
       }
       schedRender(); /* чип обновится в doRender */
       dmrlSync();
@@ -1791,47 +1636,28 @@
       return;
     }
     if (S.layer === 'dop') {
-      if (dopSource === 'nowcast') {
-        setLegendTitle('ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ');
-        /* Классическая доплер-шкала: зелёные — К радару, красные — ОТ радара.
-           nowcast отдаёт уже раскрашенные PNG — легенда описывает общепринятую
-           схему; палитра источника может незначительно отличаться. */
-        var g = document.createElement('div'); g.className = 'lgrad li';
-        g.style.background = 'linear-gradient(to right, #1d4ed8, #16a34a, #86efac, #d1d5db, #fde047, #f97316, #dc2626)';
-        el.appendChild(g);
-        var cap = document.createElement('div'); cap.className = 'li lgrad-cap';
-        cap.innerHTML = '<span>−30 м/с (к радару)</span><span>+30 (от радара)</span>'; el.appendChild(cap);
-        [['#16a34a', 'Зелёные — движение К радару'], ['#d1d5db', '~0 — поперёк луча'], ['#dc2626', 'Красные — движение ОТ радара']].forEach(function(r) {
-          var row = document.createElement('div'); row.className = 'li';
-          var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = r[0];
-          var tt = document.createElement('span'); tt.textContent = r[1];
-          row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
-        });
-        var n1 = document.createElement('div'); n1.className = 'li legend-note'; n1.textContent = 'Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + ' · шаг 10 мин'; el.appendChild(n1);
-        var n2 = document.createElement('div'); n2.className = 'li legend-note'; n2.textContent = 'Радиальная скорость ДМРЛ · nowcast.ru (Росгидромет/BUFR)'; el.appendChild(n2);
-        var n3 = document.createElement('div'); n3.className = 'li legend-note'; n3.textContent = 'Покрытие: Москва/Новосибирск/Владивосток + FMI (не вся РФ)'; el.appendChild(n3);
-      } else {
-        setLegendTitle('ДОПЛЕР · ВЕТЕР 10 М (МОДЕЛЬ)');
-        var g2 = document.createElement('div'); g2.className = 'lgrad li';
-        g2.style.background = 'linear-gradient(to right, ' + DOP_STOPS.slice().reverse().map(function(st) { return st.c; }).join(', ') + ')';
-        el.appendChild(g2);
-        var cap2 = document.createElement('div'); cap2.className = 'li lgrad-cap';
-        cap2.innerHTML = '<span>0 км/ч</span><span>50+</span>'; el.appendChild(cap2);
-        DOP_STOPS.forEach(function(st) {
-          var row = document.createElement('div'); row.className = 'li';
-          var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = st.c;
-          var tt = document.createElement('span'); tt.textContent = st.l + ' км/ч';
-          row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
-        });
-        var d1 = document.createElement('div'); d1.className = 'li legend-note'; d1.textContent = 'Стрелка — КУДА дует ветер'; el.appendChild(d1);
-        var d2 = document.createElement('div'); d2.className = 'li legend-note'; d2.textContent = 'Модель Open-Meteo (10 м), НЕ радиолокационный доплер'; el.appendChild(d2);
-      }
-      /* Переключатель источника: ДМРЛ (nowcast) ↔ модель Open-Meteo */
-      var srcBtn = document.createElement('button');
-      srcBtn.className = 'btn mini-btn' + (dopSource === 'nowcast' ? ' on' : '');
-      srcBtn.textContent = 'Источник: ' + (dopSource === 'nowcast' ? 'ДМРЛ (nowcast)' : 'Модель (Open-Meteo)');
-      srcBtn.addEventListener('click', function() { setDopSource(dopSource === 'nowcast' ? 'model' : 'nowcast', true); });
-      el.appendChild(srcBtn);
+      setLegendTitle('ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ');
+      /* БЛОК C: шкала −50…+50 м/с. 9 симметричных стопов классической доплер-схемы:
+         тёмно-синий/синий (сильно К радару) → зелёные (умеренно К) → серый (~0,
+         поперёк луча) → жёлтый/оранжевый (умеренно ОТ) → красный/тёмно-красный
+         (сильно ОТ). nowcast отдаёт уже раскрашенные PNG — легенда описывает
+         общепринятую схему; палитра источника может незначительно отличаться. */
+      var g = document.createElement('div'); g.className = 'lgrad li';
+      g.style.background = 'linear-gradient(to right, #0b2d7a, #1d4ed8, #16a34a, #86efac, #d1d5db, #fde047, #f97316, #dc2626, #7f1d1d)';
+      el.appendChild(g);
+      /* Три метки: края + центр «0» — flex space-between сам центрует среднюю;
+         больше меток на узкой панели сливаются */
+      var cap = document.createElement('div'); cap.className = 'li lgrad-cap';
+      cap.innerHTML = '<span>−50 м/с (к радару)</span><span>0</span><span>+50 (от радара)</span>'; el.appendChild(cap);
+      [['#16a34a', 'Зелёные — движение К радару (−50…0 м/с)'], ['#d1d5db', '~0 — поперёк луча'], ['#dc2626', 'Красные — движение ОТ радара (0…+50 м/с)']].forEach(function(r) {
+        var row = document.createElement('div'); row.className = 'li';
+        var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = r[0];
+        var tt = document.createElement('span'); tt.textContent = r[1];
+        row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
+      });
+      var n1 = document.createElement('div'); n1.className = 'li legend-note'; n1.textContent = 'Высота: ' + DOP_HEIGHTS[dopHeightIdx].label + ' · шаг 10 мин'; el.appendChild(n1);
+      var n2 = document.createElement('div'); n2.className = 'li legend-note'; n2.textContent = 'Радиальная скорость ДМРЛ · nowcast.ru (Росгидромет/BUFR)'; el.appendChild(n2);
+      var n3 = document.createElement('div'); n3.className = 'li legend-note'; n3.textContent = 'Покрытие: Москва/Новосибирск/Владивосток + FMI (не вся РФ)'; el.appendChild(n3);
       appendDmrlLegend(el);
       appendLtgLegend(el);
       return;
@@ -2226,14 +2052,9 @@
         notes: ['Координаты ориентировочные'] };
     }
     if (S.layer === 'dop') {
-      if (dopSource === 'nowcast') {
-        return { title: 'ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ', grad: ['#1d4ed8', '#16a34a', '#86efac', '#d1d5db', '#fde047', '#f97316', '#dc2626'], gradCaps: ['−30 (к радару)', '+30 (от радара)'],
-          rows: [['#16a34a', 'К радару'], ['#d1d5db', '~0'], ['#dc2626', 'От радара']],
-          notes: ['ДМРЛ · nowcast.ru · ' + DOP_HEIGHTS[dopHeightIdx].label] };
-      }
-      return { title: 'ДОПЛЕР · ВЕТЕР 10 М (МОДЕЛЬ)', grad: DOP_STOPS.slice().reverse().map(function(st) { return st.c; }), gradCaps: ['0 км/ч', '50+'],
-        rows: DOP_STOPS.map(function(st) { return [st.c, st.l + ' км/ч']; }),
-        notes: ['Стрелка — куда дует', 'Модель Open-Meteo, не радиодоплер'] };
+      return { title: 'ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ', grad: ['#0b2d7a', '#1d4ed8', '#16a34a', '#86efac', '#d1d5db', '#fde047', '#f97316', '#dc2626', '#7f1d1d'], gradCaps: ['−50 м/с (к радару)', '+50 (от радара)'],
+        rows: [['#16a34a', 'К радару'], ['#d1d5db', '~0 (поперёк луча)'], ['#dc2626', 'От радара']],
+        notes: ['ДМРЛ · nowcast.ru · ' + DOP_HEIGHTS[dopHeightIdx].label] };
     }
     var items = getCurrentPaletteItems();
     var o = { title: S.layer === 'radar' ? 'ОТРАЖАЕМОСТЬ dBZ' : 'ПОГОДНЫЕ ЯВЛЕНИЯ', grad: null, gradCaps: null, rows: [], notes: [] };
@@ -2360,13 +2181,11 @@
     } else if (S.layer === 'dmrl') {
       /* маркеры+круги рисуются ниже общим вызовом (оверлей 📡 или слой dmrl) */
     } else if (S.layer === 'dop') {
-      if (dopSource === 'nowcast' && nowcastLayer) {
+      if (nowcastLayer) {
         /* Реальный доплер: WMS-тайлы nowcast в пиксели (как спутник) */
         octx.save(); octx.globalAlpha = 0.85;
         drawTileLayerTo(octx, nowcastLayer);
         octx.restore();
-      } else {
-        drawDopToCtx(octx);  /* модельные стрелки ветра */
       }
     } else if (radarNcActive()) {
       /* dBZ с nowcast: WMS-тайлы в пиксели (прозрачность слоя уже включает слайдер) */
@@ -2423,7 +2242,7 @@
       dmrl_range_km: (S.layer === 'dmrl' || dmrlOverlayOn) ? DMRL_RANGE_KM : undefined,
       doppler: S.layer === 'dop' ? true : undefined,
       radar_source: (S.layer === 'radar' || S.layer === 'wx') ? (radarNcActive() ? 'nowcast.ru (' + RADAR_NC_LAYERS[radarNcIdx].id + ')' : 'rainradar.ru') : undefined,
-      doppler_source: S.layer === 'dop' ? (dopSource === 'nowcast' ? 'nowcast.ru — радиальная скорость ДМРЛ (' + DOP_HEIGHTS[dopHeightIdx].label + ')' : 'Open-Meteo wind_speed_10m (модель, не радиодоплер)') : undefined,
+      doppler_source: S.layer === 'dop' ? 'nowcast.ru — радиальная скорость ДМРЛ (' + DOP_HEIGHTS[dopHeightIdx].label + ')' : undefined,
       legend_pos: isComposite ? LEGEND_POS : undefined,
       sat_backdrop: isComposite && satBackdropActive() ? 'dark_all под спутником' : undefined,
       zoom: map.getZoom(),
