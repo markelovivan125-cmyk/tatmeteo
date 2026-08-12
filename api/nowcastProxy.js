@@ -10,7 +10,7 @@
 
 const TOKEN_URL = 'https://www.nowcast.ru/get_token';
 const WMS_URL = 'https://www.nowcast.ru/baltrad_wsgi';
-const TIMEOUT_MS = 12000;
+const TIMEOUT_MS = 18000; // было 12с: холодный старт функции + медленный апстрим отрезали тайлы
 
 // Кэш токена в глобальной области инстанса serverless-функции
 let cachedToken = null;
@@ -52,10 +52,24 @@ export default async function handler(req, res) {
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
     const token = await getToken(ctrl.signal);
-    const upstream = await fetch(WMS_URL + '?' + qs + '&token=' + encodeURIComponent(token), {
-      signal: ctrl.signal,
-      headers: { 'User-Agent': 'tatmeteo-doppler/1.0' }
-    });
+    // Один серверный ретрай при 5xx/сетевой ошибке апстрима: короткие сбои 4x4
+    // чинятся здесь, не доводя до ретраев клиента (пауза 800мс в пределах таймаута)
+    let upstream = null, lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        upstream = await fetch(WMS_URL + '?' + qs + '&token=' + encodeURIComponent(token), {
+          signal: ctrl.signal,
+          headers: { 'User-Agent': 'tatmeteo-doppler/1.0' }
+        });
+        if (upstream.status < 500) break; // 2xx/4xx — дальше по штатной ветке
+        lastErr = new Error('upstream HTTP ' + upstream.status);
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        lastErr = e; upstream = null;
+      }
+      if (attempt === 0) await new Promise(r => setTimeout(r, 800));
+    }
+    if (!upstream) throw lastErr || new Error('upstream недоступен');
     clearTimeout(timer);
 
     if (upstream.status === 401 || upstream.status === 403) {
@@ -74,8 +88,18 @@ export default async function handler(req, res) {
 
     const buf = Buffer.from(await upstream.arrayBuffer());
     const hasTime = /(^|&)time=/i.test(qs);
+    // Нормализация ТОЛЬКО для GetMap: апстрим иногда отдаёт HTML-ошибку со статусом 200 —
+    // клиент показывал бы «битый» тайл; честный 502 запускает штатный retry клиента.
+    // GetFeatureInfo/GetLegendGraphic легитимно возвращают text/html и png — не трогаем.
+    const ct = upstream.headers.get('content-type') || 'image/png';
+    if (/(^|&)request=getmap(&|$)/i.test(qs) && ct.indexOf('image') < 0) {
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end('4x4 upstream: не изображение (' + ct + ')');
+    }
     res.statusCode = 200;
-    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/png');
+    res.setHeader('Content-Type', ct);
     // Исторические кадры (TIME= задан) неизменяемы — сутки на CDN; LIVE — 5 минут
     res.setHeader('Cache-Control', hasTime
       ? 'public, max-age=3600, s-maxage=86400, immutable'
