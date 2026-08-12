@@ -660,3 +660,22 @@ body.light-theme #smooth-val, body.light-theme #opacity-val { color: #1a1a1a; }
 /* Активный пункт дропдауна: акцент-подложка ярче + чёрный текст —
    контрастнее, чем белый текст на полупрозрачном акценте */
 body.light-theme .dd-item.active { background: rgba(91, 141, 239, 0.18); color: #1a1a1a; }
+
+/* ─── БЛОК B: элементы ПОВЕРХ карты в светлых темах (light И scheme — обе ставят
+   body.light-theme). В тёмной теме они белые и остаются белыми — правила ниже
+   действуют только на светлой карте, где белое было невидимо. ─── */
+/* Прицел: тёмные линии вместо белых */
+body.light-theme .ch-h, body.light-theme .ch-v { background: rgba(0, 0, 0, 0.65); }
+/* Hover-индикатор: тёмная рамка + светлая обводка — виден на любом фоне карты */
+body.light-theme #hover-indicator { border-color: rgba(0, 0, 0, 0.55); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7); }
+/* Маркер линейки — SVG-круг Leaflet (circleMarker): заливка задаётся атрибутом
+   fill="#fff", CSS-свойство fill его перебивает. background тут не работает —
+   это не div. Синяя обводка (stroke) остаётся — контраст двойной. */
+body.light-theme .ruler-marker { fill: #1a1a1a; }
+/* Найдено аудитом: стрелка тултипа времени оставалась тёмной (var(--glass-bg)),
+   хотя сам тултип в светлой теме белый */
+body.light-theme #time-tooltip::after { border-top-color: rgba(255, 255, 255, 0.7); }
+/* Найдено аудитом: масштабная линейка Leaflet — тёмная плашка (--glass-bg не
+   переопределяется) + чёрный текст (--text-dim) = нечитаемо в светлой теме */
+body.light-theme .leaflet-control-scale-line, body.light-theme .leaflet-control-scale { background: rgba(255, 255, 255, 0.6) !important; border-color: rgba(0, 0, 0, 0.15) !important; color: #1a1a1a !important; }
+
