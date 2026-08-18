@@ -2,152 +2,333 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tatmeteo | Вход</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0e12" />
+  <title>Вход в систему</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #323441;
-      --glass-bg: rgba(38, 40, 51, 0.65);
-      --glass-border: rgba(255, 255, 255, 0.1);
-      --text: #ffffff;
-      --text-dim: rgba(255, 255, 255, 0.72);
-      --accent: #5b8def;
-      --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      --dur-fast: 120ms; --dur-base: 200ms; --dur-slow: 320ms;
-      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+      --surface-0: #0b0e12;
+      --surface-1: #11161c;
+      --surface-2: #171d24;
+      --surface-3: #202832;
+      --line: rgba(232, 239, 244, .11);
+      --line-strong: rgba(232, 239, 244, .18);
+      --text: #edf2f5;
+      --muted: #98a5ae;
+      --faint: #65727c;
+      --accent: #c5ef69;
+      --accent-ink: #18200c;
+      --danger: #ff737c;
+      --success: #70d6a1;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .46);
+      --ease: cubic-bezier(.2, .8, .2, 1);
     }
+
     * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
     body {
-      margin: 0; padding: 16px; min-height: 100vh;
-      background: var(--bg);
-      /* Мягкие «радарные» свечения на фоне */
-      background-image:
-        radial-gradient(600px 400px at 20% 15%, rgba(91, 141, 239, 0.14), transparent 70%),
-        radial-gradient(500px 500px at 85% 80%, rgba(91, 141, 239, 0.10), transparent 70%);
-      color: var(--text); font-family: 'Manrope', -apple-system, sans-serif;
-      display: flex; align-items: center; justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+      color: var(--text);
+      background: var(--surface-0);
+      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-feature-settings: "tnum" 1;
       -webkit-font-smoothing: antialiased;
     }
+
+    /* Тот же язык интерфейса, что на карте: техническая сетка и радарные окружности,
+       но без тяжёлого backdrop-filter и фоновых изображений. */
+    .map-grid, .radar-field { position: fixed; inset: 0; pointer-events: none; }
+    .map-grid {
+      opacity: .32;
+      background-image:
+        linear-gradient(rgba(232,239,244,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(232,239,244,.035) 1px, transparent 1px);
+      background-size: 52px 52px;
+      mask-image: radial-gradient(circle at center, black, transparent 76%);
+      -webkit-mask-image: radial-gradient(circle at center, black, transparent 76%);
+    }
+    .radar-field::before, .radar-field::after {
+      content: '';
+      position: absolute;
+      left: 50%; top: 50%;
+      border: 1px solid rgba(197,239,105,.08);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .radar-field::before { width: min(72vw, 760px); aspect-ratio: 1; box-shadow: 0 0 0 100px rgba(197,239,105,.015), 0 0 0 220px rgba(197,239,105,.01); }
+    .radar-field::after { width: min(38vw, 400px); aspect-ratio: 1; }
+    .radar-sweep {
+      position: fixed; left: 50%; top: 50%; width: min(36vw, 380px); height: 1px;
+      transform-origin: left center; transform: rotate(-28deg);
+      background: linear-gradient(90deg, rgba(197,239,105,.22), transparent 82%);
+      pointer-events: none;
+    }
+
+    .system-status {
+      position: fixed; top: 18px; right: 20px;
+      display: flex; align-items: center; gap: 7px;
+      color: var(--faint); font-size: 8px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase;
+    }
+    .system-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 4px rgba(112,214,161,.11); }
+
+    .auth-shell { position: relative; z-index: 2; width: min(100%, 410px); }
     .auth-box {
-      background: var(--glass-bg);
-      backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border: 1px solid var(--glass-border);
-      border-radius: 20px; box-shadow: var(--shadow);
-      padding: 32px; width: 100%; max-width: 360px; text-align: center;
-      animation: card-in var(--dur-slow) var(--ease-out) backwards;
+      padding: 27px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: #0f141a;
+      box-shadow: var(--shadow);
+      animation: card-in 320ms var(--ease) both;
     }
-    @keyframes card-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-    .auth-logo { font-size: 26px; font-weight: 800; color: var(--text); margin-bottom: 6px; letter-spacing: 0.5px; }
-    .auth-subtitle { font-size: 11px; letter-spacing: 2px; color: var(--text-dim); margin-bottom: 26px; text-transform: uppercase; font-weight: 600; }
+    @keyframes card-in { from { opacity: 0; transform: translateY(8px) scale(.99); } }
+
+    .auth-head { margin-bottom: 24px; }
+    .auth-kicker {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px; color: var(--accent);
+      font-size: 8px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+    }
+    .auth-kicker::before { content: ''; width: 18px; height: 1px; background: var(--accent); }
+    h1 { margin: 0; color: var(--text); font-size: 23px; font-weight: 760; letter-spacing: -.035em; }
+    .auth-subtitle { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+
+    .field { margin-bottom: 14px; }
+    .field-label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+    .input-wrap { position: relative; }
     .auth-form input {
-      width: 100%; background: rgba(0, 0, 0, 0.25);
-      border: 1px solid var(--glass-border); color: var(--text);
-      padding: 12px 15px; border-radius: 10px; font-size: 15px; font-family: inherit;
-      margin-bottom: 14px; outline: none;
-      transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
+      width: 100%; height: 44px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      outline: 0;
+      color: var(--text);
+      background: #0b1015;
+      font: 600 12px/1 'Manrope', sans-serif;
+      transition: border-color 120ms, background 120ms, box-shadow 120ms;
     }
-    .auth-form input::placeholder { color: var(--text-dim); }
-    .auth-form input:hover { border-color: rgba(255, 255, 255, 0.2); }
-    .auth-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.25); background: rgba(0, 0, 0, 0.35); }
-    .auth-captcha-box { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
+    .auth-form input::placeholder { color: var(--faint); font-weight: 500; }
+    .auth-form input:hover { border-color: rgba(232,239,244,.27); }
+    .auth-form input:focus { border-color: var(--accent); background: #0d1318; box-shadow: 0 0 0 3px rgba(197,239,105,.1); }
+    #pass { padding-right: 82px; }
+    .pass-toggle {
+      position: absolute; right: 6px; top: 6px; height: 32px;
+      padding: 0 8px; border: 0; border-radius: 4px;
+      color: var(--muted); background: transparent;
+      font: 650 9px/1 'Manrope', sans-serif; cursor: pointer;
+    }
+    .pass-toggle:hover { color: var(--text); background: rgba(255,255,255,.05); }
+
+    .captcha-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .captcha-label-row .field-label { margin: 0; }
+    .captcha-hint { color: var(--faint); font-size: 8px; }
+    .auth-captcha-box { display: grid; grid-template-columns: 1fr 104px; gap: 8px; margin-bottom: 20px; }
     .auth-captcha-img {
-      flex: 1; height: 48px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--glass-border);
-      border-radius: 10px; cursor: pointer; display: flex; align-items: center;
-      justify-content: center; overflow: hidden;
-      transition: border-color var(--dur-base) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+      height: 48px; display: grid; place-items: center; overflow: hidden;
+      border: 1px solid var(--line-strong); border-radius: 6px;
+      background: #edf2f5; cursor: pointer;
+      transition: border-color 120ms, transform 120ms;
     }
     .auth-captcha-img:hover { border-color: var(--accent); }
-    .auth-captcha-img:active { transform: scale(0.97); }
-    .auth-captcha-img svg { width: 100%; height: 100%; }
-    .auth-captcha-box input { width: 90px; margin-bottom: 0; text-align: center; text-transform: uppercase; font-weight: 700; color: var(--text); }
+    .auth-captcha-img:active { transform: translateY(1px); }
+    .auth-captcha-img.loading::after { content: 'Загрузка…'; color: #4e5961; font-size: 9px; font-weight: 700; }
+    .auth-captcha-img svg { display: block; width: 100%; height: 100%; }
+    .auth-captcha-box input { height: 48px; padding: 0 8px; text-align: center; text-transform: uppercase; letter-spacing: .12em; font-size: 13px; }
+
     .auth-btn {
-      width: 100%; padding: 13px; background: var(--accent); color: #ffffff;
-      border: 0; border-radius: 10px; font-weight: 700; font-size: 14px; font-family: inherit;
-      letter-spacing: 1px; cursor: pointer;
-      box-shadow: 0 4px 16px rgba(91, 141, 239, 0.4);
-      transition: background-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), transform var(--dur-fast) var(--ease-out), opacity var(--dur-base) var(--ease-out);
+      width: 100%; height: 44px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1px solid var(--accent); border-radius: 6px;
+      color: var(--accent-ink); background: var(--accent);
+      font: 800 10px/1 'Manrope', sans-serif; letter-spacing: .08em; cursor: pointer;
+      transition: filter 120ms, transform 120ms, opacity 120ms;
     }
-    .auth-btn:hover { background: #6c99f2; box-shadow: 0 6px 22px rgba(91, 141, 239, 0.55); }
-    .auth-btn:active { transform: scale(0.97); }
-    .auth-btn:disabled { opacity: 0.6; cursor: wait; }
-    .auth-btn:focus-visible, .auth-captcha-img:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .auth-error { color: #ff6b6b; font-size: 13px; font-weight: 600; margin-top: 15px; display: none; animation: shake 0.4s var(--ease-out); }
-    @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-3px); } }
+    .auth-btn::after { content: '→'; font-size: 15px; font-weight: 500; transition: transform 120ms; }
+    .auth-btn:hover { filter: brightness(1.06); }
+    .auth-btn:hover::after { transform: translateX(2px); }
+    .auth-btn:active { transform: translateY(1px); }
+    .auth-btn:disabled { opacity: .55; cursor: wait; }
+    .auth-btn:disabled::after { display: none; }
+
+    .auth-error {
+      display: none; margin-top: 12px; padding: 9px 10px;
+      border: 1px solid rgba(255,115,124,.25); border-radius: 5px;
+      color: #ff9aa1; background: rgba(255,115,124,.07);
+      font-size: 10px; font-weight: 620; line-height: 1.4;
+    }
+    .auth-error.visible { display: block; animation: error-in 180ms var(--ease); }
+    @keyframes error-in { from { opacity: 0; transform: translateY(-3px); } }
+
+    .auth-foot {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 13px; padding: 0 2px;
+      color: var(--faint); font-size: 8px; font-weight: 600;
+    }
+    .auth-foot span:last-child { font-variant-numeric: tabular-nums; }
+
+    button:focus-visible, input:focus-visible, .auth-captcha-img:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    @media (max-width: 480px) {
+      body { align-items: end; padding: 12px 8px max(8px, env(safe-area-inset-bottom)); }
+      .map-grid { background-size: 40px 40px; }
+      .system-status { top: max(14px, env(safe-area-inset-top)); right: 14px; }
+      .auth-shell { width: 100%; }
+      .auth-box { padding: 22px 18px; border-radius: 12px; }
+      h1 { font-size: 21px; }
+      .auth-foot { padding-inline: 2px; }
+    }
     @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
     }
   </style>
 </head>
 <body>
-  <div class="auth-box">
-    <div class="auth-logo">Tatmeteo</div>
-    <div class="auth-subtitle">Вход в систему</div>
-    <form id="auth-form" class="auth-form">
-      <input type="password" id="pass" placeholder="Введите пароль" required autocomplete="off">
-      <div class="auth-captcha-box">
-        <div id="captcha-img" class="auth-captcha-img" title="Обновить код"></div>
-        <input type="text" id="captcha" placeholder="Код" required maxlength="5" autocomplete="off">
-      </div>
-      <button type="submit" class="auth-btn">ВОЙТИ</button>
-      <div id="err" class="auth-error"></div>
-    </form>
-  </div>
+  <div class="map-grid" aria-hidden="true"></div>
+  <div class="radar-field" aria-hidden="true"></div>
+  <div class="radar-sweep" aria-hidden="true"></div>
+
+  <div class="system-status" aria-label="Система доступна"><i></i><span>Система доступна</span></div>
+
+  <main class="auth-shell">
+    <section class="auth-box" aria-labelledby="login-title">
+      <header class="auth-head">
+        <div class="auth-kicker">Защищённый раздел</div>
+        <h1 id="login-title">Вход в систему</h1>
+        <p class="auth-subtitle">Введите выданный пароль и проверочный код.</p>
+      </header>
+
+      <form id="auth-form" class="auth-form" novalidate>
+        <div class="field">
+          <label class="field-label" for="pass">Пароль доступа</label>
+          <div class="input-wrap">
+            <input type="password" id="pass" placeholder="Введите пароль" required autocomplete="current-password">
+            <button type="button" class="pass-toggle" id="pass-toggle" aria-controls="pass" aria-pressed="false">Показать</button>
+          </div>
+        </div>
+
+        <div class="captcha-label-row">
+          <label class="field-label" for="captcha">Проверочный код</label>
+          <span class="captcha-hint">Нажмите на изображение, чтобы обновить</span>
+        </div>
+        <div class="auth-captcha-box">
+          <div id="captcha-img" class="auth-captcha-img loading" title="Обновить код" role="button" tabindex="0" aria-label="Обновить проверочный код"></div>
+          <input type="text" id="captcha" placeholder="Код" required maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        </div>
+
+        <button type="submit" class="auth-btn"><span>Войти</span></button>
+        <div id="err" class="auth-error" role="alert" aria-live="polite"></div>
+      </form>
+    </section>
+
+    <footer class="auth-foot"><span>Защита сессии и устройства</span><span>Redis / TLS</span></footer>
+  </main>
 
   <script>
-    let currentCaptchaId = null;
+    (function() {
+      'use strict';
+      var currentCaptchaId = null;
+      var form = document.getElementById('auth-form');
+      var passInput = document.getElementById('pass');
+      var captchaInput = document.getElementById('captcha');
+      var captchaImage = document.getElementById('captcha-img');
+      var errorBox = document.getElementById('err');
+      var submitButton = form.querySelector('.auth-btn');
+      var submitLabel = submitButton.querySelector('span');
+      var passToggle = document.getElementById('pass-toggle');
 
-    async function loadCaptcha() {
-      try {
-        const res = await fetch('/api/captcha');
-        const data = await res.json();
-        currentCaptchaId = data.id;
-        document.getElementById('captcha-img').innerHTML = data.svg;
-      } catch (e) { console.error('Ошибка загрузки капчи:', e); }
-    }
-
-    document.getElementById('captcha-img').addEventListener('click', loadCaptcha);
-
-    document.getElementById('auth-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const pass = document.getElementById('pass').value;
-      const captchaCode = document.getElementById('captcha').value;
-      const errBox = document.getElementById('err');
-      const btn = e.target.querySelector('.auth-btn');
-      
-      errBox.style.display = 'none';
-      btn.textContent = 'ПРОВЕРКА...';
-      btn.disabled = true;
-
-      try {
-        const res = await fetch('/api/auth?action=login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: pass, captchaId: currentCaptchaId, captchaCode: captchaCode })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-          window.location.href = '/';
-        } else {
-          errBox.textContent = data.error || 'Ошибка авторизации';
-          errBox.style.display = 'block';
-          loadCaptcha();
-        }
-      } catch (err) {
-        errBox.textContent = 'Сбой сети. Попробуйте снова.';
-        errBox.style.display = 'block';
-        loadCaptcha();
-      } finally {
-        btn.textContent = 'ВОЙТИ';
-        btn.disabled = false;
+      function showError(message) {
+        errorBox.textContent = message;
+        errorBox.classList.add('visible');
       }
-    });
+      function clearError() {
+        errorBox.textContent = '';
+        errorBox.classList.remove('visible');
+      }
 
-    loadCaptcha();
+      async function loadCaptcha() {
+        captchaImage.classList.add('loading');
+        captchaImage.innerHTML = '';
+        currentCaptchaId = null;
+        try {
+          var response = await fetch('/api/captcha', { cache: 'no-store' });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          var data = await response.json();
+          if (!data.id || !data.svg) throw new Error('Некорректный ответ');
+          currentCaptchaId = data.id;
+          captchaImage.innerHTML = data.svg;
+          captchaImage.classList.remove('loading');
+        } catch (error) {
+          captchaImage.classList.remove('loading');
+          captchaImage.textContent = 'Не удалось загрузить код';
+          showError('Проверочный код недоступен. Нажмите на поле, чтобы повторить.');
+        }
+      }
+
+      captchaImage.addEventListener('click', function() { clearError(); loadCaptcha(); });
+      captchaImage.addEventListener('keydown', function(event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault(); clearError(); loadCaptcha();
+        }
+      });
+
+      passToggle.addEventListener('click', function() {
+        var visible = passInput.type === 'text';
+        passInput.type = visible ? 'password' : 'text';
+        passToggle.textContent = visible ? 'Показать' : 'Скрыть';
+        passToggle.setAttribute('aria-pressed', visible ? 'false' : 'true');
+        passInput.focus();
+      });
+
+      form.addEventListener('submit', async function(event) {
+        event.preventDefault();
+        clearError();
+        if (!passInput.value) { showError('Введите пароль.'); passInput.focus(); return; }
+        if (!captchaInput.value) { showError('Введите проверочный код.'); captchaInput.focus(); return; }
+        if (!currentCaptchaId) { showError('Обновите проверочный код.'); loadCaptcha(); return; }
+
+        submitLabel.textContent = 'Проверка';
+        submitButton.disabled = true;
+        try {
+          var response = await fetch('/api/auth?action=login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              password: passInput.value,
+              captchaId: currentCaptchaId,
+              captchaCode: captchaInput.value
+            })
+          });
+          var data = await response.json();
+          if (data.success) {
+            submitLabel.textContent = 'Доступ разрешён';
+            window.location.replace('/');
+            return;
+          }
+          showError(data.error || 'Ошибка авторизации.');
+          captchaInput.value = '';
+          await loadCaptcha();
+          captchaInput.focus();
+        } catch (error) {
+          showError('Сбой сети. Проверьте подключение и повторите попытку.');
+          captchaInput.value = '';
+          await loadCaptcha();
+        } finally {
+          submitLabel.textContent = 'Войти';
+          submitButton.disabled = false;
+        }
+      });
+
+      loadCaptcha();
+    })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f442c5bc9f12a',t:'MTc4NjM2NzY5NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a29038af5b12e84e',t:'MTc4NjM3NzcwOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
