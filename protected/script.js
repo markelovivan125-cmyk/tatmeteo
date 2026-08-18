@@ -781,7 +781,9 @@
     }
     clearTimeout(satSwapTmr);
     satSwapTmr = setTimeout(function() {
-      if (S.layer !== 'sat') return;
+      /* За время debounce пользователь мог выбрать «Высота ВГО».
+         В этом случае EUMETSAT нельзя создавать поверх самостоятельного слоя. */
+      if (S.layer !== 'sat' || satProduct) return;
       var ch = SAT_CHANNELS[satChIdx];
       var live = S.ts >= nowTs();
       var old = eumetsatLayer;
@@ -1000,10 +1002,13 @@
   function prodEnter() {
     var pd = prodDef();
     if (!pd) return;
-    /* канал EUMETSAT снимается — продукт сам по себе слой */
-    if (eumetsatLayer) { map.removeLayer(eumetsatLayer); eumetsatLayer = null; }
+    /* Высота ВГО — самостоятельный слой: отменяем отложенный запуск спутника,
+       снимаем оба EUMETSAT-слоя и спутниковую тёмную подложку. */
+    clearTimeout(satSwapTmr); satSwapTmr = null;
+    if (eumetsatLayer) { if (map.hasLayer(eumetsatLayer)) map.removeLayer(eumetsatLayer); eumetsatLayer = null; }
     if (satOldLayer) { if (map.hasLayer(satOldLayer)) map.removeLayer(satOldLayer); satOldLayer = null; }
     satLoading = false; $('pulse').classList.remove('busy');
+    updateSatBackdrop(false);
     if (pd.kind === 'wms') {
       if (!hiddenPanels['tl']) $('tl').style.display = 'flex'; /* композит: история, шаг 10 мин */
       S.manualTime = false; S.ts = nowTs(); buildFrames(); updHUD();
@@ -1038,6 +1043,7 @@
       /* возврат к каналу EUMETSAT */
       S.manualTime = false; S.ts = nowTs(); buildFrames(); updHUD();
       satApplyTime(true);
+      updateSatBackdrop(true);
       buildLegend(); satUpdateChip();
       toast('Канал: ' + SAT_CHANNELS[satChIdx].label);
     }
