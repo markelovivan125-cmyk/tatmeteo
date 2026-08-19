@@ -5,13 +5,68 @@
     }
   },
   "rewrites": [
-    { "source": "/api/auth", "destination": "/api/authgrhouhfiesuhghth" },
-    { "source": "/api/me", "destination": "/api/mydsugfusyfjhdsfbe" },
-    { "source": "/api/admin", "destination": "/api/adminAEYWTF" },
-    { "source": "/api/captcha", "destination": "/api/captchdgjkjsngjksvna" },
-    { "source": "/api/satProxy", "destination": "/api/satProxy" },
-    { "source": "/login.html", "destination": "/login.html" },
-    { "source": "/admin.html", "destination": "/admin.html" },
-    { "source": "/(.*)", "destination": "/api/adskfjsiguojifnjkserve?path=$1" }
+    {
+      "source": "/api/auth",
+      "destination": "/api/authgrhouhfiesuhghth"
+    },
+    {
+      "source": "/api/me",
+      "destination": "/api/mydsugfusyfjhdsfbe"
+    },
+    {
+      "source": "/api/admin",
+      "destination": "/api/adminAEYWTF"
+    },
+    {
+      "source": "/api/captcha",
+      "destination": "/api/captchdgjkjsngjksvna"
+    },
+    {
+      "source": "/api/satProxy",
+      "destination": "/api/satProxy"
+    },
+    {
+      "source": "/",
+      "destination": "/landing.html"
+    },
+    {
+      "source": "/forecast",
+      "destination": "/forecast.html"
+    },
+    {
+      "source": "/forecast.html",
+      "destination": "/forecast.html"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/api/adskfjsiguojifnjkserve?path=index.html"
+    },
+    {
+      "source": "/radar",
+      "destination": "/api/adskfjsiguojifnjkserve?path=index.html"
+    },
+    {
+      "source": "/login.html",
+      "destination": "/login.html"
+    },
+    {
+      "source": "/admin.html",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/api/adskfjsiguojifnjkserve?path=$1"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    }
   ]
 }
