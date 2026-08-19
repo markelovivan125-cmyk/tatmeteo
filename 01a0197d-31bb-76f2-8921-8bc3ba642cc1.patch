@@ -1,0 +1,724 @@
+diff --git a/api/adminAEYWTF.js b/api/admin.js
+similarity index 60%
+rename from api/adminAEYWTF.js
+rename to api/admin.js
+index e7fed91..5557abf 100644
+--- a/api/adminAEYWTF.js
++++ b/api/admin.js
+@@ -1,111 +1,101 @@
+-import { Redis } from '@upstash/redis';
+-import crypto from 'crypto';
+-
+-const redis = new Redis({
+-  url: process.env.UPSTASH_REDIS_REST_URL,
+-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+-});
+-
+-/* ─── Мастер-пароль админки («admin_master_key»): ТОЛЬКО из env (никогда не хардкодить!).
+-   ПОЛНАЯ ИНСТРУКЦИЯ (генерация ключа, Vercel, локально): README.md → «admin_master_key».
+-   Как задать:
+-   • Vercel: Dashboard → Project → Settings → Environment Variables →
+-     ADMIN_MASTER_PASS → значение → Production/Preview/Development → Redeploy.
+-   • Локально: cp .env.example .env, вписать значение; `vercel dev` подхватит сам.
+-   ВАЖНО: старый пароль засветился в истории коммитов публичного репозитория —
+-   после деплоя задайте НОВОЕ значение (историю git не очистить задним числом). ─── */
+-const ADMIN_MASTER_PASS = process.env.ADMIN_MASTER_PASS || '';
+-
+-/* Сравнение, устойчивое к timing-атакам: длины выравниваем хэшированием */
+-function safeEqual(a, b) {
+-  const ha = crypto.createHash('sha256').update(String(a)).digest();
+-  const hb = crypto.createHash('sha256').update(String(b)).digest();
+-  return crypto.timingSafeEqual(ha, hb);
+-}
+-
+-export default async function handler(req, res) {
+-  const action = req.query.action;
+-  const cookies = req.headers.cookie || '';
+-  const adminCookieMatch = cookies.match(/admin_sess=([^;]+)/);
+-  const adminSess = adminCookieMatch ? adminCookieMatch[1] : null;
+-
+-  if (req.method === 'POST' && action === 'admin_login') {
+-    const getBody = () => new Promise((resolve) => {
+-      let body = '';
+-      req.on('data', chunk => { body += chunk; });
+-      req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
+-    });
+-    const body = await getBody();
+-
+-    if (!ADMIN_MASTER_PASS) {
+-      /* Не даём доступ и не логируем значения */
+-      return res.status(500).json({ error: 'ADMIN_MASTER_PASS не задан на сервере' });
+-    }
+-    if (typeof body.masterPassword === 'string' && safeEqual(body.masterPassword, ADMIN_MASTER_PASS)) {
+-      const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+-      await redis.set(`admin_sess:${token}`, '1', { ex: 86400 }); 
+-      res.setHeader('Set-Cookie', `admin_sess=${token}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`);
+-      return res.json({ success: true });
+-    }
+-    return res.status(401).json({ error: 'Неверный мастер-пароль' });
+-  }
+-
+-  let isAuthorized = false;
+-  if (adminSess) {
+-    const exists = await redis.get(`admin_sess:${adminSess}`);
+-    if (exists) isAuthorized = true;
+-  }
+-
+-  if (!isAuthorized) {
+-    return res.status(403).json({ error: 'Доступ запрещен. Авторизуйтесь.' });
+-  }
+-
+-  try {
+-    if (req.method === 'GET') {
+-      const passwords = await redis.smembers('passwords');
+-      const logs = await redis.lrange('logs', 0, 19);
+-
+-      const passStatus = [];
+-      for (const p of passwords) {
+-        const keys = await redis.keys(`sess:${p}:*`);
+-        let ips = [];
+-        for (const k of keys) {
+-          const ip = await redis.get(k);
+-          if (ip) ips.push(ip);
+-        }
+-        passStatus.push({ password: p, activeDevices: keys.length, ips: ips.join(', ') });
+-      }
+-
+-      return res.json({ passwords: passStatus, logs });
+-    }
+-
+-    if (req.method === 'POST') {
+-      const getBody = () => new Promise((resolve) => {
+-        let body = '';
+-        req.on('data', chunk => { body += chunk; });
+-        req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
+-      });
+-      const body = await getBody();
+-      const { action: postAction, password } = body;
+-
+-      if (postAction === 'generate') {
+-        const newPass = Math.random().toString(36).slice(2, 10);
+-        await redis.sadd('passwords', newPass);
+-        return res.json({ success: true, password: newPass });
+-      }
+-
+-      if (postAction === 'delete') {
+-        if (!password) return res.status(400).json({ error: 'Не указан пароль' });
+-        await redis.srem('passwords', password);
+-        await redis.del(`device:${password}`);
+-        const keys = await redis.keys(`sess:${password}:*`);
+-        if (keys.length > 0) await redis.del(...keys);
+-        return res.json({ success: true });
+-      }
+-    }
+-
+-    return res.status(404).json({ error: 'Not found' });
+-  } catch (error) {
+-    return res.status(500).json({ error: error.message });
+-  }
+-}
++import { Redis } from '@upstash/redis';
++import crypto from 'crypto';
++
++const redis = new Redis({
++  url: process.env.UPSTASH_REDIS_REST_URL,
++  token: process.env.UPSTASH_REDIS_REST_TOKEN,
++});
++
++const ADMIN_MASTER_PASS = process.env.ADMIN_MASTER_PASS || '';
++
++function safeEqual(a, b) {
++  const ha = crypto.createHash('sha256').update(String(a)).digest();
++  const hb = crypto.createHash('sha256').update(String(b)).digest();
++  return crypto.timingSafeEqual(ha, hb);
++}
++
++function readJsonBody(req) {
++  return new Promise((resolve) => {
++    let body = '';
++    req.on('data', (chunk) => { body += chunk; });
++    req.on('end', () => {
++      try { resolve(JSON.parse(body)); } catch { resolve({}); }
++    });
++  });
++}
++
++export default async function handler(req, res) {
++  const action = req.query.action;
++  const cookies = req.headers.cookie || '';
++  const adminCookieMatch = cookies.match(/admin_sess=([^;]+)/);
++  const adminSess = adminCookieMatch ? adminCookieMatch[1] : null;
++
++  if (req.method === 'POST' && action === 'admin_login') {
++    const body = await readJsonBody(req);
++
++    if (!ADMIN_MASTER_PASS) {
++      return res.status(500).json({ error: 'ADMIN_MASTER_PASS не задан на сервере' });
++    }
++    if (typeof body.masterPassword === 'string' && safeEqual(body.masterPassword, ADMIN_MASTER_PASS)) {
++      const token = crypto.randomBytes(24).toString('hex');
++      await redis.set(`admin_sess:${token}`, '1', { ex: 86400 });
++      res.setHeader('Set-Cookie', `admin_sess=${token}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax`);
++      return res.json({ success: true });
++    }
++    return res.status(401).json({ error: 'Неверный мастер-пароль' });
++  }
++
++  let isAuthorized = false;
++  if (adminSess) {
++    const exists = await redis.get(`admin_sess:${adminSess}`);
++    if (exists) isAuthorized = true;
++  }
++
++  if (!isAuthorized) {
++    return res.status(403).json({ error: 'Доступ запрещен. Авторизуйтесь.' });
++  }
++
++  try {
++    if (req.method === 'GET') {
++      const passwords = await redis.smembers('passwords');
++      const logs = await redis.lrange('logs', 0, 19);
++
++      const passStatus = [];
++      for (const p of passwords) {
++        const keys = await redis.keys(`sess:${p}:*`);
++        const ips = [];
++        for (const k of keys) {
++          const ip = await redis.get(k);
++          if (ip) ips.push(ip);
++        }
++        passStatus.push({ password: p, activeDevices: keys.length, ips: ips.join(', ') });
++      }
++
++      return res.json({ passwords: passStatus, logs });
++    }
++
++    if (req.method === 'POST') {
++      const body = await readJsonBody(req);
++      const { action: postAction, password } = body;
++
++      if (postAction === 'generate') {
++        const newPass = crypto.randomBytes(5).toString('hex').slice(0, 8);
++        await redis.sadd('passwords', newPass);
++        return res.json({ success: true, password: newPass });
++      }
++
++      if (postAction === 'delete') {
++        if (!password) return res.status(400).json({ error: 'Не указан пароль' });
++        await redis.srem('passwords', password);
++        await redis.del(`device:${password}`);
++        const keys = await redis.keys(`sess:${password}:*`);
++        if (keys.length > 0) await redis.del(...keys);
++        return res.json({ success: true });
++      }
++    }
++
++    return res.status(404).json({ error: 'Not found' });
++  } catch (error) {
++    return res.status(500).json({ error: error.message });
++  }
++}
+diff --git a/api/auth.js b/api/auth.js
+new file mode 100644
+index 0000000..001415d
+--- /dev/null
++++ b/api/auth.js
+@@ -0,0 +1,111 @@
++import { Redis } from '@upstash/redis';
++import crypto from 'crypto';
++
++const redis = new Redis({
++  url: process.env.UPSTASH_REDIS_REST_URL,
++  token: process.env.UPSTASH_REDIS_REST_TOKEN,
++});
++
++function readJsonBody(req) {
++  return new Promise((resolve) => {
++    let body = '';
++    req.on('data', (chunk) => { body += chunk; });
++    req.on('end', () => {
++      try { resolve(JSON.parse(body)); } catch { resolve({}); }
++    });
++  });
++}
++
++export default async function handler(req, res) {
++  const action = req.query.action;
++  const userIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress;
++
++  if (req.method !== 'POST') {
++    return res.status(404).json({ error: 'Not found' });
++  }
++
++  const body = await readJsonBody(req);
++  const { password, captchaId, captchaCode } = body;
++
++  if (action === 'login') {
++    if (!captchaId || !captchaCode) return res.json({ success: false, error: 'Введите код с картинки' });
++    const realCaptcha = await redis.get(`captcha:${captchaId}`);
++    await redis.del(`captcha:${captchaId}`);
++    if (!realCaptcha || realCaptcha !== String(captchaCode).toLowerCase()) {
++      return res.json({ success: false, error: 'Неверный код с картинки' });
++    }
++
++    const attempts = await redis.get(`attempts:${userIp}`);
++    if (attempts && parseInt(attempts, 10) >= 5) {
++      return res.status(429).json({ success: false, error: 'Слишком много попыток. IP заблокирован на 15 минут.' });
++    }
++
++    if (!password) return res.status(400).json({ success: false, error: 'Введите пароль' });
++
++    const exists = await redis.sismember('passwords', password);
++    if (exists !== 1) {
++      await redis.incr(`attempts:${userIp}`);
++      await redis.expire(`attempts:${userIp}`, 900);
++      return res.json({ success: false, error: 'Неверный пароль' });
++    }
++
++    const cookies = req.headers.cookie || '';
++    const devMatch = cookies.match(/device_token=([^;]+)/);
++    const currentDeviceToken = devMatch ? devMatch[1] : null;
++    const boundDevice = await redis.get(`device:${password}`);
++
++    const setCookies = [];
++    if (boundDevice) {
++      if (boundDevice !== currentDeviceToken) {
++        return res.json({ success: false, error: 'Доступ запрещен. Пароль привязан к другому устройству.' });
++      }
++    } else {
++      const newDevToken = crypto.randomBytes(16).toString('hex');
++      await redis.set(`device:${password}`, newDevToken);
++      setCookies.push(`device_token=${newDevToken}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`);
++    }
++
++    await redis.del(`attempts:${userIp}`);
++
++    const sid = crypto.randomBytes(12).toString('hex');
++    await redis.set(`sess:${password}:${sid}`, userIp);
++    await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${password} | Вход`);
++
++    setCookies.push(
++      `auth_pass=${password}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`,
++      `auth_sid=${sid}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`
++    );
++    res.setHeader('Set-Cookie', setCookies);
++    return res.json({ success: true });
++  }
++
++  if (action === 'heartbeat') {
++    const cookies = req.headers.cookie || '';
++    const passMatch = cookies.match(/auth_pass=([^;]+)/);
++    const sidMatch = cookies.match(/auth_sid=([^;]+)/);
++    if (passMatch && sidMatch) {
++      const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
++      if (exists === 1) {
++        await redis.set(`sess:${passMatch[1]}:${sidMatch[1]}`, userIp);
++      }
++    }
++    return res.json({ success: true });
++  }
++
++  if (action === 'logout') {
++    const cookies = req.headers.cookie || '';
++    const passMatch = cookies.match(/auth_pass=([^;]+)/);
++    const sidMatch = cookies.match(/auth_sid=([^;]+)/);
++    if (passMatch && sidMatch) {
++      await redis.del(`sess:${passMatch[1]}:${sidMatch[1]}`);
++      await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${passMatch[1]} | Выход`);
++      res.setHeader('Set-Cookie', [
++        'auth_pass=; HttpOnly; Path=/; Max-Age=0',
++        'auth_sid=; HttpOnly; Path=/; Max-Age=0'
++      ]);
++    }
++    return res.json({ success: true });
++  }
++
++  return res.status(404).json({ error: 'Not found' });
++}
+diff --git a/api/authgrhouhfiesuhghth.js b/api/authgrhouhfiesuhghth.js
+deleted file mode 100644
+index bd02e64..0000000
+--- a/api/authgrhouhfiesuhghth.js
++++ /dev/null
+@@ -1,110 +0,0 @@
+-import { Redis } from '@upstash/redis';
+-
+-const redis = new Redis({
+-  url: process.env.UPSTASH_REDIS_REST_URL,
+-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+-});
+-
+-export default async function handler(req, res) {
+-  const action = req.query.action;
+-  const userIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress;
+-
+-  const getBody = () => new Promise((resolve) => {
+-    let body = '';
+-    req.on('data', chunk => { body += chunk; });
+-    req.on('end', () => {
+-      try { resolve(JSON.parse(body)); } 
+-      catch { resolve({}); }
+-    });
+-  });
+-
+-  if (req.method === 'POST') {
+-    const body = await getBody();
+-    const { password, captchaId, captchaCode } = body;
+-
+-    if (action === 'login') {
+-      if (!captchaId || !captchaCode) return res.json({ success: false, error: 'Введите код с картинки' });
+-      const realCaptcha = await redis.get(`captcha:${captchaId}`);
+-      await redis.del(`captcha:${captchaId}`);
+-      if (!realCaptcha || realCaptcha !== captchaCode.toLowerCase()) {
+-        return res.json({ success: false, error: 'Неверный код с картинки' });
+-      }
+-
+-      const attempts = await redis.get(`attempts:${userIp}`);
+-      if (attempts && parseInt(attempts) >= 5) {
+-        return res.status(429).json({ success: false, error: '🚫 Слишком много попыток. IP заблокирован на 15 минут.' });
+-      }
+-
+-      if (!password) return res.status(400).json({ success: false, error: 'Введите пароль' });
+-
+-      const exists = await redis.sismember('passwords', password);
+-      if (exists !== 1) {
+-        await redis.incr(`attempts:${userIp}`);
+-        await redis.expire(`attempts:${userIp}`, 900);
+-        return res.json({ success: false, error: 'Неверный пароль' });
+-      }
+-
+-      const cookies = req.headers.cookie || '';
+-      const devMatch = cookies.match(/device_token=([^;]+)/);
+-      const currentDeviceToken = devMatch ? devMatch[1] : null;
+-
+-      const boundDevice = await redis.get(`device:${password}`);
+-
+-      if (boundDevice) {
+-        if (boundDevice !== currentDeviceToken) {
+-          return res.json({ success: false, error: '🚫 Доступ запрещен! Пароль привязан к другому устройству.' });
+-        }
+-      } else {
+-        const newDevToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+-        await redis.set(`device:${password}`, newDevToken);
+-        res.setHeader('Set-Cookie', `device_token=${newDevToken}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`);
+-      }
+-
+-      await redis.del(`attempts:${userIp}`);
+-
+-      const sid = Math.random().toString(36).slice(2);
+-      // Сохраняем сессию БЕЗ таймера (навсегда)
+-      await redis.set(`sess:${password}:${sid}`, userIp);
+-      
+-      await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${password} | Вход`);
+-
+-      // Куки живут 10 лет
+-      res.setHeader('Set-Cookie', [
+-        `auth_pass=${password}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`,
+-        `auth_sid=${sid}; HttpOnly; Path=/; Max-Age=315360000; SameSite=Lax`
+-      ]);
+-      return res.json({ success: true });
+-    }
+-
+-    if (action === 'heartbeat') {
+-      const cookies = req.headers.cookie || '';
+-      const passMatch = cookies.match(/auth_pass=([^;]+)/);
+-      const sidMatch = cookies.match(/auth_sid=([^;]+)/);
+-      if (passMatch && sidMatch) {
+-        const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
+-        if (exists === 1) {
+-          // Просто перезаписываем IP (без продления таймера, так как его нет)
+-          await redis.set(`sess:${passMatch[1]}:${sidMatch[1]}`, userIp);
+-        }
+-      }
+-      return res.json({ success: true });
+-    }
+-
+-    if (action === 'logout') {
+-      const cookies = req.headers.cookie || '';
+-      const passMatch = cookies.match(/auth_pass=([^;]+)/);
+-      const sidMatch = cookies.match(/auth_sid=([^;]+)/);
+-      if (passMatch && sidMatch) {
+-        await redis.del(`sess:${passMatch[1]}:${sidMatch[1]}`);
+-        await redis.lpush('logs', `[${new Date().toLocaleString('ru-RU')}] IP: ${userIp} | ${passMatch[1]} | Выход`);
+-        res.setHeader('Set-Cookie', [
+-          'auth_pass=; HttpOnly; Path=/; Max-Age=0',
+-          'auth_sid=; HttpOnly; Path=/; Max-Age=0'
+-        ]);
+-      }
+-      return res.json({ success: true });
+-    }
+-  }
+-
+-  return res.status(404).json({ error: 'Not found' });
+-}
+diff --git a/api/captchdgjkjsngjksvna.js b/api/captcha.js
+similarity index 73%
+rename from api/captchdgjkjsngjksvna.js
+rename to api/captcha.js
+index 40b0584..f2faa00 100644
+--- a/api/captchdgjkjsngjksvna.js
++++ b/api/captcha.js
+@@ -1,4 +1,5 @@
+ import { Redis } from '@upstash/redis';
++import crypto from 'crypto';
+ 
+ const redis = new Redis({
+   url: process.env.UPSTASH_REDIS_REST_URL,
+@@ -7,8 +8,9 @@ const redis = new Redis({
+ 
+ function randomText(len) {
+   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
++  const bytes = crypto.randomBytes(len);
+   let str = '';
+-  for (let i = 0; i < len; i++) str += chars.charAt(Math.floor(Math.random() * chars.length));
++  for (let i = 0; i < len; i++) str += chars[bytes[i] % chars.length];
+   return str;
+ }
+ 
+@@ -16,14 +18,14 @@ export default async function handler(req, res) {
+   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
+ 
+   const text = randomText(5);
+-  const id = Math.random().toString(36).slice(2);
+-  
++  const id = crypto.randomBytes(12).toString('hex');
++
+   await redis.set(`captcha:${id}`, text.toLowerCase(), { ex: 300 });
+ 
+   let svg = `<svg width="150" height="50" xmlns="http://www.w3.org/2000/svg">`;
+   svg += `<rect width="100%" height="100%" fill="#2a2a2a" />`;
+   for (let i = 0; i < 6; i++) {
+-    svg += `<line x1="${Math.random()*150}" y1="${Math.random()*50}" x2="${Math.random()*150}" y2="${Math.random()*50}" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>`;
++    svg += `<line x1="${Math.random() * 150}" y1="${Math.random() * 50}" x2="${Math.random() * 150}" y2="${Math.random() * 50}" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>`;
+   }
+   text.split('').forEach((c, i) => {
+     const x = 15 + i * 25;
+@@ -32,6 +34,6 @@ export default async function handler(req, res) {
+     svg += `<text x="${x}" y="${y}" font-family="monospace" font-size="24" font-weight="bold" fill="#ffffff" transform="rotate(${rot} ${x} ${y})">${c}</text>`;
+   });
+   svg += `</svg>`;
+-  
++
+   return res.json({ id, svg });
+ }
+diff --git a/api/mydsugfusyfjhdsfbe.js b/api/me.js
+similarity index 74%
+rename from api/mydsugfusyfjhdsfbe.js
+rename to api/me.js
+index 15c6f73..1d628f4 100644
+--- a/api/mydsugfusyfjhdsfbe.js
++++ b/api/me.js
+@@ -1,33 +1,29 @@
+-import { Redis } from '@upstash/redis';
+-
+-const redis = new Redis({
+-  url: process.env.UPSTASH_REDIS_REST_URL,
+-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+-});
+-
+-export default async function handler(req, res) {
+-  // Запрещаем Vercel и браузеру кэшировать этот ответ
+-  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+-  res.setHeader('Pragma', 'no-cache');
+-  res.setHeader('Expires', '0');
+-
+-  const cookies = req.headers.cookie || '';
+-  const passMatch = cookies.match(/auth_pass=([^;]+)/);
+-  const sidMatch = cookies.match(/auth_sid=([^;]+)/);
+-  
+-  if (passMatch && sidMatch) {
+-    const pass = passMatch[1];
+-    const sid = sidMatch[1];
+-    
+-    try {
+-      const exists = await redis.exists(`sess:${pass}:${sid}`);
+-      if (exists === 1) {
+-        return res.status(200).json({ auth: true });
+-      }
+-    } catch (e) {
+-      console.error('Redis error in me.js:', e);
+-    }
+-  }
+-  
+-  return res.status(200).json({ auth: false });
+-}
++import { Redis } from '@upstash/redis';
++
++const redis = new Redis({
++  url: process.env.UPSTASH_REDIS_REST_URL,
++  token: process.env.UPSTASH_REDIS_REST_TOKEN,
++});
++
++export default async function handler(req, res) {
++  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
++  res.setHeader('Pragma', 'no-cache');
++  res.setHeader('Expires', '0');
++
++  const cookies = req.headers.cookie || '';
++  const passMatch = cookies.match(/auth_pass=([^;]+)/);
++  const sidMatch = cookies.match(/auth_sid=([^;]+)/);
++
++  if (passMatch && sidMatch) {
++    try {
++      const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
++      if (exists === 1) {
++        return res.status(200).json({ auth: true });
++      }
++    } catch (e) {
++      console.error('Redis error in me.js:', e);
++    }
++  }
++
++  return res.status(200).json({ auth: false });
++}
+diff --git a/api/adskfjsiguojifnjkserve.js b/api/serve.js
+similarity index 54%
+rename from api/adskfjsiguojifnjkserve.js
+rename to api/serve.js
+index f8a26e9..9f3fe8d 100644
+--- a/api/adskfjsiguojifnjkserve.js
++++ b/api/serve.js
+@@ -8,8 +8,18 @@ const redis = new Redis({
+   token: process.env.UPSTASH_REDIS_REST_TOKEN,
+ });
+ 
++const MIME = {
++  '.html': 'text/html; charset=utf-8',
++  '.js': 'text/javascript; charset=utf-8',
++  '.css': 'text/css; charset=utf-8',
++  '.png': 'image/png',
++  '.jpg': 'image/jpeg',
++  '.jpeg': 'image/jpeg',
++  '.svg': 'image/svg+xml',
++  '.json': 'application/json; charset=utf-8',
++};
++
+ export default async function handler(req, res) {
+-  // 1. Проверка авторизации по Redis
+   const cookies = req.headers.cookie || '';
+   const passMatch = cookies.match(/auth_pass=([^;]+)/);
+   const sidMatch = cookies.match(/auth_sid=([^;]+)/);
+@@ -24,49 +34,40 @@ export default async function handler(req, res) {
+     }
+   }
+ 
+-  // Если не авторизован — выкидываем на страницу входа
+-    if (!isAuth) {
+-    res.writeHead(302, { 
++  if (!isAuth) {
++    res.writeHead(302, {
+       Location: '/login.html',
+       'Cache-Control': 'no-store, max-age=0, must-revalidate',
+-      'Pragma': 'no-cache',
+-      'Expires': '0'
++      Pragma: 'no-cache',
++      Expires: '0',
+     });
+     res.end();
+     return;
+   }
+ 
+-  // 2. Надежное извлечение пути к файлу
+   const parsedUrl = parse(req.url, true);
+   let reqPath = parsedUrl.query.path || '';
+-  
+-  // Если путь пустой (зашли на главную) — отдаем index.html
+-  if (!reqPath || reqPath === '/') {
+-    reqPath = 'index.html';
++  if (!reqPath || reqPath === '/') reqPath = 'index.html';
++
++  reqPath = decodeURIComponent(reqPath).replace(/^\/+/, '').replace(/\.\.\//g, '');
++
++  const protectedRoot = path.resolve(process.cwd(), 'protected');
++  const filePath = path.resolve(protectedRoot, reqPath);
++  if (!filePath.startsWith(protectedRoot + path.sep) && filePath !== protectedRoot) {
++    res.status(403).send('Forbidden');
++    return;
+   }
+-  
+-  reqPath = decodeURIComponent(reqPath);
+-  // Убираем слеши в начале и защищаемся от выхода за пределы папки
+-  reqPath = reqPath.replace(/^\/+/, '').replace(/\.\.\//g, '');
+ 
+-  const filePath = path.join(process.cwd(), 'protected', reqPath);
+-  
+   try {
+     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+       res.status(404).send('404: File Not Found');
+       return;
+     }
+ 
+-    // 3. Отдаем файл с правильными заголовками
+     const ext = path.extname(filePath);
+-    let contentType = 'text/html; charset=utf-8';
+-    if (ext === '.js') contentType = 'text/javascript; charset=utf-8';
+-    else if (ext === '.css') contentType = 'text/css; charset=utf-8';
+-    else if (ext === '.png') contentType = 'image/png';
+-    else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+-
++    const contentType = MIME[ext] || 'application/octet-stream';
+     const fileContent = fs.readFileSync(filePath);
+-        res.setHeader('Content-Type', contentType);
++    res.setHeader('Content-Type', contentType);
+     res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+     res.setHeader('Pragma', 'no-cache');
+     res.setHeader('Expires', '0');
+diff --git a/protected/index.html b/protected/index.html
+index bec34d6..ded3df7 100644
+--- a/protected/index.html
++++ b/protected/index.html
+@@ -192,6 +192,6 @@
+     }, 15000);
+   </script>
+   <script src="script.js"></script>
+-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2d0eafa2ffcbe60',t:'MTc4NzA1NjEwMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
++</body>
+ </html>
+ 
+diff --git a/public/admin.html b/public/admin.html
+index 20aa7df..ed27593 100644
+--- a/public/admin.html
++++ b/public/admin.html
+@@ -176,8 +176,8 @@
+             }
+         }
+ 
+-        checkAuth();
+-        setInterval(load, 5000);
+-    </script>
+-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a28f6d1f2f19f12a',t:'MTc4NjM2OTM3Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
++        checkAuth();
++        setInterval(load, 5000);
++    </script>
++</body>
+ </html>
+diff --git a/vercel.json b/vercel.json
+index 5f21b0b..dfb4dd8 100644
+--- a/vercel.json
++++ b/vercel.json
+@@ -1,17 +1,19 @@
+ {
+   "functions": {
+-    "api/adskfjsiguojifnjkserve.js": {
++    "api/serve.js": {
+       "includeFiles": "protected/**"
+     }
+   },
+   "rewrites": [
+-    { "source": "/api/auth", "destination": "/api/authgrhouhfiesuhghth" },
+-    { "source": "/api/me", "destination": "/api/mydsugfusyfjhdsfbe" },
+-    { "source": "/api/admin", "destination": "/api/adminAEYWTF" },
+-    { "source": "/api/captcha", "destination": "/api/captchdgjkjsngjksvna" },
++    { "source": "/api/auth", "destination": "/api/auth" },
++    { "source": "/api/me", "destination": "/api/me" },
++    { "source": "/api/admin", "destination": "/api/admin" },
++    { "source": "/api/captcha", "destination": "/api/captcha" },
+     { "source": "/api/satProxy", "destination": "/api/satProxy" },
++    { "source": "/api/nowcastProxy", "destination": "/api/nowcastProxy" },
++    { "source": "/api/lightning", "destination": "/api/lightning" },
+     { "source": "/login.html", "destination": "/login.html" },
+     { "source": "/admin.html", "destination": "/admin.html" },
+-    { "source": "/(.*)", "destination": "/api/adskfjsiguojifnjkserve?path=$1" }
++    { "source": "/(.*)", "destination": "/api/serve?path=$1" }
+   ]
+ }
