@@ -3,10 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { parse } from 'url';
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+/* Redis опционален: если переменные окружения не заданы (не настроено на Vercel),
+   функция не падает с 500 — просто не пускает без сессии (редирект на вход).
+   Это чинит «не находит радар» при отсутствии UPSTASH_REDIS_*. */
+const redis = (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
+  ? new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN })
+  : null;
 
 export default async function handler(req, res) {
   // 1. Проверка авторизации по Redis
@@ -15,7 +17,7 @@ export default async function handler(req, res) {
   const sidMatch = cookies.match(/auth_sid=([^;]+)/);
 
   let isAuth = false;
-  if (passMatch && sidMatch) {
+  if (redis && passMatch && sidMatch) {
     try {
       const exists = await redis.exists(`sess:${passMatch[1]}:${sidMatch[1]}`);
       if (exists === 1) isAuth = true;
@@ -40,8 +42,10 @@ export default async function handler(req, res) {
   const parsedUrl = parse(req.url, true);
   let reqPath = parsedUrl.query.path || '';
   
-  // Если путь пустой (зашли на главную) — отдаем index.html
-  if (!reqPath || reqPath === '/') {
+  // Если путь пустой (зашли на главную) — отдаем index.html.
+  // Алиас 'radar' (из /radar через catch-all) тоже ведёт на index.html —
+  // так радар находится даже при старом vercel.json без явного rewrite.
+  if (!reqPath || reqPath === '/' || reqPath === 'radar') {
     reqPath = 'index.html';
   }
   
