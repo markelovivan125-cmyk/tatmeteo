@@ -148,6 +148,11 @@
     [16, [159,15,71]], [17, [216,45,156]]
   ];
 
+  /* Встроенные палитры доплера и высоты ВГО в едином формате {v, r, l}:
+     dop — стопы по скорости м/с (−50…+50, шаг 5), height — классы кода (0–17 → «0–1 км»…). */
+  var BUILTIN_DOP = [{ name: 'Стандартная (доплер)', items: DOP_DISPLAY_PALETTE.map(function(p) { return { v: p[0], r: p[1], l: (p[0] > 0 ? '+' : '') + p[0] }; }), builtin: true }];
+  var BUILTIN_HEIGHT = [{ name: 'Стандартная (высота)', items: HEIGHT_DISPLAY_PALETTE.map(function(p) { return { v: p[0], r: p[1], l: p[0] + '–' + (p[0] + 1) + ' км' }; }), builtin: true }];
+
   var HISTORY_MINUTES = 190, MAX_HISTORY_SEC = HISTORY_MINUTES * 60;
   var BASE_RES_KM = 2;
 
@@ -231,7 +236,7 @@
     ruler: { active: false, points: [], markers: [], polyline: null, label: null, segmentLabels: [] }
   };
   S.px = S.pxLevels[S.pxIndex];
-  var palettes = { radar: { list: [], activeIdx: 0 }, wx: { list: [], activeIdx: 0 }, sat: { byChannel: {} } };
+  var palettes = { radar: { list: [], activeIdx: 0 }, wx: { list: [], activeIdx: 0 }, sat: { byChannel: {} }, dop: { list: [], activeIdx: 0 }, height: { list: [], activeIdx: 0 } };
   /* ─── Палитры спутника: по одной корзине на канал (palettes.sat.byChannel[chId] = {list, activeIdx}).
      Фасад .list/.activeIdx через геттеры указывает на канал, выбранный в модалке (satModalChId),
      поэтому ВЕСЬ существующий код модалки (список/создание/удаление/экспорт) работает без правок ─── */
@@ -497,6 +502,14 @@
       var t = this._tiles[key];
       if (t && t.el) { t.el._satAborted = true; clearTimeout(t.el._satTimer); } /* не грузить снятые тайлы */
       return L.TileLayer.WMS.prototype._removeTile.call(this, key);
+    },
+    /* Спутник EUMETSAT: WMS отдаёт данные стабильно только на зумах 4 и 8,
+       на промежуточных зумах тайлы регулярно не догружаются. При snapZoom
+       запрашиваем только ближайший из разрешённых зумов (карта ≤6 → z4, ≥7 → z8);
+       Leaflet сам масштабирует тайлы под текущий зум (механизм maxNativeZoom). */
+    _clampZoom: function(zoom) {
+      if (this.options.snapZoom) return zoom >= 7 ? 8 : 4;
+      return L.TileLayer.prototype._clampZoom.call(this, zoom);
     }
   });
 
@@ -513,6 +526,8 @@
       tileSize: 256,
       zIndex: 10,           /* поверх тёмной подложки (zIndex 5) на светлых темах */
       maxZoom: 10,          /* как у карты — не гонять WMS на бесполезных зумах */
+      snapZoom: true,       /* WMS-запросы ТОЛЬКО на z4/z8: EUMETSAT стабильно отдаёт данные
+                               на этих зумах, промежуточные часто «не грузятся» */
       updateWhenIdle: false, /* обновление во время движения — карта «живее» */
       keepBuffer: 2
     };
@@ -634,6 +649,20 @@
       } else { initDefaultPalettes('wx'); }
     } catch (e) { initDefaultPalettes('radar'); initDefaultPalettes('wx'); }
 
+    ['dop', 'height'].forEach(function(layer) {
+      try {
+        var d = localStorage.getItem(layer + 'Palettes');
+        if (d) {
+          var parsedD = JSON.parse(d);
+          if (Array.isArray(parsedD) && parsedD.length > 0) {
+            var customD = parsedD.filter(function(pp) { return !pp.builtin; });
+            var builtinD = layer === 'dop' ? BUILTIN_DOP[0] : BUILTIN_HEIGHT[0];
+            palettes[layer].list = [builtinD].concat(customD);
+          } else { initDefaultPalettes(layer); }
+        } else { initDefaultPalettes(layer); }
+      } catch (e) { initDefaultPalettes(layer); }
+    });
+
     /* Палитры спутника: ключ satPalettes = { chId: { custom: [...], activeIdx: n } }.
        Встроенные не сериализуем — восстанавливаются из BUILTIN_SAT */
     try {
@@ -650,8 +679,29 @@
 
     if (palettes.radar.activeIdx >= palettes.radar.list.length) palettes.radar.activeIdx = 0;
     if (palettes.wx.activeIdx >= palettes.wx.list.length) palettes.wx.activeIdx = 0;
+    if (palettes.dop.activeIdx >= palettes.dop.list.length) palettes.dop.activeIdx = 0;
+    if (palettes.height.activeIdx >= palettes.height.list.length) palettes.height.activeIdx = 0;
   }
-  function initDefaultPalettes(layer) { if (layer === 'sat') return; var items = layer === 'radar' ? BUILTIN_RADAR : BUILTIN_WX; var name = layer === 'radar' ? 'Стандартная (радар)' : 'Стандартная (явления)'; palettes[layer].list = [{ name: name, items: items, builtin: true }]; palettes[layer].activeIdx = 0; savePalettesToStorage(layer); }
+  /* Активные элементы палитры слоя (с авто-инициализацией встроенной) */
+  function activePaletteItems(layer) {
+    var b = palettes[layer];
+    if (!b || !b.list || !b.list.length) initDefaultPalettes(layer);
+    b = palettes[layer];
+    var idx = Math.max(0, Math.min(b.activeIdx || 0, b.list.length - 1));
+    return (b.list[idx] && b.list[idx].items) || [];
+  }
+  function initDefaultPalettes(layer) {
+    if (layer === 'sat') return;
+    var items, name;
+    if (layer === 'radar') { items = BUILTIN_RADAR; name = 'Стандартная (радар)'; }
+    else if (layer === 'wx') { items = BUILTIN_WX; name = 'Стандартная (явления)'; }
+    else if (layer === 'dop') { items = BUILTIN_DOP[0].items; name = 'Стандартная (доплер)'; }
+    else if (layer === 'height') { items = BUILTIN_HEIGHT[0].items; name = 'Стандартная (высота)'; }
+    else { items = []; name = 'Стандартная'; }
+    palettes[layer].list = [{ name: name, items: items, builtin: true }];
+    palettes[layer].activeIdx = 0;
+    savePalettesToStorage(layer);
+  }
   function savePalettesToStorage(layer) {
     try {
       if (layer === 'sat') {
@@ -827,6 +877,7 @@
       lyr.on('load', function() { if (lyr === prodWmsLayer) { prodWmsErr = false; $('pulse').classList.remove('busy'); satUpdateChip(); } });
       lyr.on('loading', function() { if (lyr === prodWmsLayer) { $('pulse').classList.add('busy'); satUpdateChip(); } });
       lyr.on('tileerror', function() { if (lyr === prodWmsLayer) { prodWmsErr = true; satUpdateChip(); } });
+      lyr.on('tileload', function(e) { if (lyr === prodWmsLayer && satProduct === 'height') recolorHeightTile(e.tile); });
       lyr.addTo(map);
       prodWmsLayer = lyr;
       if (old) {
@@ -1539,9 +1590,16 @@
     return new SatWMS('/api/nowcastProxy', params);
   }
   var dopRecolorCache = new Map(), DOP_RECOLOR_MAX = 180;
+  function dopPaletteIsDefault() { return palettes.dop.activeIdx === 0; }
   function dopDisplayColor(v) {
-    var idx = Math.round((Math.max(-50, Math.min(50, v)) + 50) / 5);
-    return DOP_DISPLAY_PALETTE[idx][1];
+    var items = activePaletteItems('dop');
+    if (!items.length) return DOP_DISPLAY_PALETTE[0][1];
+    var best = null, bd = 1e18;
+    for (var i = 0; i < items.length; i++) {
+      var d = Math.abs(items[i].v - v);
+      if (d < bd) { bd = d; best = items[i]; }
+    }
+    return best ? best.r : [64, 15, 37];
   }
   function recolorDopTile(tile) {
     if (!tile || tile._dopRecolored || !tile._satUrl) return;
@@ -1571,6 +1629,52 @@
         if (dopRecolorCache.size >= DOP_RECOLOR_MAX) dopRecolorCache.delete(dopRecolorCache.keys().next().value);
         dopRecolorCache.set(tile._satUrl, url);
         tile._dopRecolored = true; tile.src = url;
+      } catch (e) { /* исходный тайл остаётся видимым */ }
+    } });
+  }
+
+  /* Реколоризация тайлов ВЫСОТЫ ВГО под кастомную палитру: цвет пикселя источника
+     сопоставляется с HEIGHT_DISPLAY_PALETTE (код класса 0–17), затем класс перекрашивается
+     по активной палитре palettes.height. Стандартная палитра — тайлы как есть. */
+  var heightRecolorCache = new Map(), HEIGHT_RECOLOR_MAX = 180;
+  function heightPaletteIsDefault() { return palettes.height.activeIdx === 0; }
+  function heightDisplayColor(code) {
+    var items = activePaletteItems('height');
+    if (!items.length) return [128, 128, 128];
+    for (var i = 0; i < items.length; i++) if (items[i].v === code) return items[i].r;
+    var best = null, bd = 1e18;
+    for (var j = 0; j < items.length; j++) { var d = Math.abs(items[j].v - code); if (d < bd) { bd = d; best = items[j]; } }
+    return best ? best.r : [128, 128, 128];
+  }
+  function recolorHeightTile(tile) {
+    if (!tile || tile._heightRecolored || !tile._satUrl) return;
+    if (heightPaletteIsDefault()) return; /* источник уже в стандартной палитре */
+    var hit = heightRecolorCache.get(tile._satUrl);
+    if (hit) { tile._heightRecolored = true; tile.src = hit; return; }
+    enqueueTile({ run: function() {
+      try {
+        if (tile._satAborted || tile._heightRecolored) return;
+        var c = document.createElement('canvas'); c.width = c.height = 256;
+        var cc = c.getContext('2d'); cc.drawImage(tile, 0, 0, 256, 256);
+        var image = cc.getImageData(0, 0, 256, 256), d = image.data;
+        for (var i = 0; i < d.length; i += 4) {
+          if (d[i + 3] < 20) continue;
+          var best = null, bd = 1e9;
+          for (var j = 0; j < HEIGHT_DISPLAY_PALETTE.length; j++) {
+            var src = HEIGHT_DISPLAY_PALETTE[j][1], dr = d[i] - src[0], dg = d[i + 1] - src[1], db = d[i + 2] - src[2];
+            var dist = dr * dr + dg * dg + db * db;
+            if (dist < bd) { bd = dist; best = HEIGHT_DISPLAY_PALETTE[j][0]; }
+          }
+          if (best == null || bd > 4500) continue;
+          var col = heightDisplayColor(best);
+          if (!col) continue;
+          d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2];
+        }
+        cc.putImageData(image, 0, 0);
+        var url = c.toDataURL('image/png');
+        if (heightRecolorCache.size >= HEIGHT_RECOLOR_MAX) heightRecolorCache.delete(heightRecolorCache.keys().next().value);
+        heightRecolorCache.set(tile._satUrl, url);
+        tile._heightRecolored = true; tile.src = url;
       } catch (e) { /* исходный тайл остаётся видимым */ }
     } });
   }
@@ -1878,6 +1982,8 @@
   function forceRefresh() {
     if (S.layer === 'sat') { satRecolorCache.clear(); satApplyTime(true); return; } /* смена палитры спутника → перекрасить тайлы */
     if (radarNcActive()) { radarRecolorCache.clear(); radarNcApply(true); return; } /* nowcast-радар: пересоздать слой (палитра/кадр) */
+    if (S.layer === 'dop') { dopRecolorCache.clear(); nowcastApplyTime(true); return; } /* доплер: сбросить кэш перекраски и пересоздать слой */
+    if (S.layer === 'sat' && satProduct === 'height') { heightRecolorCache.clear(); prodWmsApply(true); return; } /* высота ВГО */
     S.cache.clear(); S.failed.clear(); S.pending.clear(); S.loadN = 0; $('pulse').classList.remove('busy'); schedRender();
   }
   /* Вращение иконки ↻ — видимый статус обновления */
@@ -2167,14 +2273,14 @@
         /* Исправленная легенда: GetLegendGraphic источника отдаёт только цветные
            плашки без чисел. Используем те же RGB, но строим читаемую шкалу сами. */
         var hScale = document.createElement('div'); hScale.className = 'height-scale';
-        HEIGHT_DISPLAY_PALETTE.forEach(function(p) {
+        activePaletteItems('height').forEach(function(p) {
           var rowH = document.createElement('div'); rowH.className = 'height-stop';
-          var swH = document.createElement('i'); swH.style.background = 'rgb(' + p[1].join(',') + ')';
-          var txH = document.createElement('span'); txH.textContent = p[0] + '–' + (p[0] + 1) + ' км';
+          var swH = document.createElement('i'); swH.style.background = 'rgb(' + p.r.join(',') + ')';
+          var txH = document.createElement('span'); txH.textContent = p.l || (p.v + '–' + (p.v + 1) + ' км');
           rowH.appendChild(swH); rowH.appendChild(txH); hScale.appendChild(rowH);
         });
         el.appendChild(hScale);
-        mkNote('Высота верхней границы облаков · фактические цвета источника 4x4');
+        mkNote('Высота верхней границы облаков · активная палитра');
         mkNote('Станции: Москва · Новосибирск · Владивосток · шаг 10 мин');
         mkNote('Клик по карте — высота в точке');
         appendLtgLegend(el);
@@ -2309,11 +2415,12 @@
       setLegendTitle('ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ');
       /* Дискретная шкала с точной подписью каждого класса: −50, −45 … +50 м/с. */
       var dopScale = document.createElement('div'); dopScale.className = 'doppler-scale';
-      DOP_DISPLAY_PALETTE.forEach(function(p) {
+      var dopItems = activePaletteItems('dop');
+      dopItems.forEach(function(p) {
         var cell = document.createElement('div'); cell.className = 'doppler-stop';
-        cell.style.background = 'rgb(' + p[1].join(',') + ')';
-        cell.title = (p[0] > 0 ? '+' : '') + p[0] + ' м/с';
-        var label = document.createElement('span'); label.textContent = (p[0] > 0 ? '+' : '') + p[0];
+        cell.style.background = 'rgb(' + p.r.join(',') + ')';
+        cell.title = p.l || ((p.v > 0 ? '+' : '') + p.v + ' м/с');
+        var label = document.createElement('span'); label.textContent = p.l || ((p.v > 0 ? '+' : '') + p.v);
         cell.appendChild(label); dopScale.appendChild(cell);
       });
       el.appendChild(dopScale);
@@ -2459,14 +2566,15 @@
   /* Доплер: цвет → скорость по калиброванной таблице DOP_NC_RGB (nearest) */
   function dopNcFindInfo(r, g, b) {
     var best = -1, bd = 1e9;
-    /* Сначала новая экранная палитра (точные классы по 5 м/с). */
-    for (var i = 0; i < DOP_DISPLAY_PALETTE.length; i++) {
-      var p = DOP_DISPLAY_PALETTE[i], dr = r - p[1][0], dg = g - p[1][1], db = b - p[1][2];
+    /* Сначала активная экранная палитра (точные классы по скорости). */
+    var dopItemsFind = activePaletteItems('dop');
+    for (var i = 0; i < dopItemsFind.length; i++) {
+      var p = dopItemsFind[i], dr = r - p.r[0], dg = g - p.r[1], db = b - p.r[2];
       var d = dr * dr + dg * dg + db * db;
       if (d < bd) { bd = d; best = i; }
     }
     if (best >= 0 && bd <= 1800) {
-      var v = DOP_DISPLAY_PALETTE[best][0];
+      var v = dopItemsFind[best].v;
       return { label: (v > 0 ? '+' : '') + v + ' м/с' + (v < 0 ? ' · к радару' : (v > 0 ? ' · от радара' : ' · нулевая изодопа')), v: v };
     }
     /* Fallback для исходного тайла до завершения реколоризации. */
@@ -2686,7 +2794,8 @@
       else {
         var km = (best.code - 2) / 10;
         lbl = km.toFixed(1) + ' км';
-        color = '#5b8def';
+        var hc = heightDisplayColor(best.code);
+        color = 'rgb(' + hc.join(',') + ')'; /* цвет активной палитры высоты */
         meta = 'Слой: <b>Высота ВГО</b> (4x4, BUFR)<br>Станция: ' + escHtml(best.st.label) + '<br>Код пикселя: ' + best.code + '<br>Кадр: ' + t + ' МСК';
       }
       popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:' + color + '"></div><div class="popup-label">' + escHtml(lbl) + '</div></div>' +
@@ -2715,8 +2824,14 @@
     if (!satPalChRow) return;
     var isSat = currentLayerForModal === 'sat';
     satPalChRow.style.display = isSat ? 'block' : 'none';
-    /* Подпись поля порога: для спутника — яркость 0–255, для радара/ОЯ — дБZ */
-    if (entryVal) entryVal.placeholder = isSat ? '0–255' : 'дБZ';
+    /* Подпись поля порога: для спутника — яркость 0–255, для радара/ОЯ — дБZ,
+       для доплера — м/с, для высоты — км */
+    if (entryVal) {
+      if (isSat) entryVal.placeholder = '0–255';
+      else if (currentLayerForModal === 'dop') entryVal.placeholder = 'м/с';
+      else if (currentLayerForModal === 'height') entryVal.placeholder = 'км';
+      else entryVal.placeholder = 'дБZ';
+    }
     if (!isSat) return;
     if (satPalChSelect.value !== satModalChId) satPalChSelect.value = satModalChId;
     var ch = null;
@@ -2725,18 +2840,29 @@
       ? 'Канал уже цветной — палитра применяется только к легенде'
       : 'Порог = яркость пикселя 0–255 (255 — самое холодное/яркое)';
   }
-  function openModal() { lastFocused = document.activeElement; modal.classList.add('open'); focusModal(modal); currentLayerForModal = S.layer; satModalChId = SAT_CHANNELS[satChIdx].id; syncSatPalUI(); modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
+  function paletteAppliesNow() {
+    return (currentLayerForModal === S.layer) ||
+      (currentLayerForModal === 'height' && S.layer === 'sat' && satProduct === 'height') ||
+      (currentLayerForModal === 'radar' && S.layer === 'sat' && satProduct === 'composite');
+  }
+  function openModal() { lastFocused = document.activeElement; modal.classList.add('open'); focusModal(modal); currentLayerForModal = (S.layer === 'sat' && satProduct === 'height') ? 'height' : (S.layer === 'sat' && satProduct === 'composite') ? 'radar' : S.layer; satModalChId = SAT_CHANNELS[satChIdx].id; syncSatPalUI(); modalTabs.forEach(function(btn) { btn.classList.toggle('active', btn.dataset.layer === currentLayerForModal); }); renderPaletteList(); closeForm(); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); }
   function closeModal() { modal.classList.remove('open'); closeForm(); restoreFocus(); }
-  function renderPaletteList() { var list = palettes[currentLayerForModal].list; var activeIdx = palettes[currentLayerForModal].activeIdx; var html = ''; list.forEach(function(p, idx) { var activeClass = idx === activeIdx ? 'active' : ''; var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : ''; var editBtn = p.builtin ? '' : '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>'; html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' + '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' + '<div>' + editBtn + (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') + '</div></div>'; }); paletteListContainer.innerHTML = html; paletteListContainer.querySelectorAll('.palette-item').forEach(function(el) { el.addEventListener('click', function(e) { if (e.target.classList.contains('del') || e.target.classList.contains('edit-btn')) return; var idx = parseInt(this.dataset.idx); palettes[currentLayerForModal].activeIdx = idx; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } }); }); paletteListContainer.querySelectorAll('.edit-btn').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); startEditingPalette(idx); }); }); paletteListContainer.querySelectorAll('.del').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); var list2 = palettes[currentLayerForModal].list; if (list2[idx].builtin) return; if (confirm('Удалить палитру "' + list2[idx].name + '"?')) { list2.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx = list2.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } }); }); }
+  function renderPaletteList() { var list = palettes[currentLayerForModal].list; var activeIdx = palettes[currentLayerForModal].activeIdx; var html = ''; list.forEach(function(p, idx) { var activeClass = idx === activeIdx ? 'active' : ''; var builtinBadge = p.builtin ? '<span class="badge">встроенная</span>' : ''; var editBtn = p.builtin ? '' : '<button class="edit-btn" data-idx="' + idx + '" title="Редактировать">✎</button>'; html += '<div class="palette-item ' + activeClass + '" data-idx="' + idx + '">' + '<span class="name">' + escHtml(p.name) + ' ' + builtinBadge + '</span>' + '<div>' + editBtn + (p.builtin ? '' : '<button class="del" data-idx="' + idx + '" title="Удалить">✕</button>') + '</div></div>'; }); paletteListContainer.innerHTML = html; paletteListContainer.querySelectorAll('.palette-item').forEach(function(el) { el.addEventListener('click', function(e) { if (e.target.classList.contains('del') || e.target.classList.contains('edit-btn')) return; var idx = parseInt(this.dataset.idx); palettes[currentLayerForModal].activeIdx = idx; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (paletteAppliesNow()) { buildLegend(); forceRefresh(); } }); }); paletteListContainer.querySelectorAll('.edit-btn').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); startEditingPalette(idx); }); }); paletteListContainer.querySelectorAll('.del').forEach(function(btn) { btn.addEventListener('click', function(e) { e.stopPropagation(); var idx = parseInt(this.dataset.idx); var list2 = palettes[currentLayerForModal].list; if (list2[idx].builtin) return; if (confirm('Удалить палитру "' + list2[idx].name + '"?')) { list2.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list2.length) palettes[currentLayerForModal].activeIdx = list2.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (paletteAppliesNow()) { buildLegend(); forceRefresh(); } } }); }); }
   function startEditingPalette(idx) { var list = palettes[currentLayerForModal].list; if (idx < 0 || idx >= list.length) return; var pal = list[idx]; if (pal.builtin) { toast('Встроенную палитру нельзя редактировать'); return; } editingIndex = idx; newPalName.value = pal.name; tempEntries = pal.items.map(function(item) { return { val: item.v, color: '#' + item.r.map(function(c) { return c.toString(16).padStart(2, '0'); }).join(''), label: item.l, r: { r: item.r[0], g: item.r[1], b: item.r[2] } }; }); editingEntryIndex = -1; renderEntries(); createForm.classList.add('open'); savePaletteBtn.textContent = '💾 Обновить'; toast('Редактирование палитры "' + pal.name + '"'); }
   function closeForm() { createForm.classList.remove('open'); editingIndex = -1; editingEntryIndex = -1; tempEntries = []; renderEntries(); savePaletteBtn.textContent = '💾 Сохранить'; newPalName.value = 'Новая палитра'; entryVal.value = '0'; entryColor.value = '#00aaff'; entryLabel.value = 'Осадки'; }
   function renderEntries() { entriesList.innerHTML = ''; tempEntries.forEach(function(e, idx) { var div = document.createElement('div'); div.className = 'entry'; if (editingEntryIndex === idx) { /* цвета — через CSS-классы и токены (светлая тема работает) */ div.innerHTML = `<input type="number" class="edit-val entry-input" value="${e.val}" step="1" style="width:50px"><input type="color" class="edit-color entry-color" value="${e.color}"><input type="text" class="edit-label entry-input" value="${escHtml(e.label)}" style="flex:1"><button class="save-entry-btn" data-idx="${idx}">✓</button>`; } else { div.innerHTML = `<span><span class="color-swatch" style="background:${e.color}"></span> ${e.val} → ${escHtml(e.label)}</span><div><button class="edit-entry-btn" data-idx="${idx}">✎</button><button class="del-entry" data-idx="${idx}">✕</button></div>`; } entriesList.appendChild(div); }); entriesList.querySelectorAll('.save-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); var entryDiv = this.closest('.entry'); var valInput = entryDiv.querySelector('.edit-val'); var colorInput = entryDiv.querySelector('.edit-color'); var labelInput = entryDiv.querySelector('.edit-label'); var newVal = parseFloat(valInput.value); if (isNaN(newVal)) { toast('Введите число'); return; } var newColor = colorInput.value; var newLabel = labelInput.value.trim() || 'без метки'; var rgb = hexToRgb(newColor); if (!rgb) { toast('Неверный цвет'); return; } tempEntries[idx] = { val: newVal, color: newColor, label: newLabel, r: rgb }; editingEntryIndex = -1; renderEntries(); }); }); entriesList.querySelectorAll('.edit-entry-btn').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); editingEntryIndex = idx; renderEntries(); }); }); entriesList.querySelectorAll('.del-entry').forEach(function(btn) { btn.addEventListener('click', function() { var idx = parseInt(this.dataset.idx); tempEntries.splice(idx, 1); if (editingEntryIndex === idx) editingEntryIndex = -1; else if (editingEntryIndex > idx) editingEntryIndex--; renderEntries(); }); }); }
   function addEntry() { var v = parseFloat(entryVal.value); if (isNaN(v)) { toast('Введите число'); return; } var color = entryColor.value; var label = entryLabel.value.trim() || 'без метки'; var rgb = hexToRgb(color); if (!rgb) { toast('Неверный цвет'); return; } tempEntries.push({ val: v, color: color, label: label, r: rgb }); renderEntries(); entryVal.value = ''; entryLabel.value = ''; var maxVal = tempEntries.reduce(function(mx, e) { return Math.max(mx, e.val); }, 0); entryVal.value = (maxVal + 5); }
   function hexToRgb(hex) { var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null; }
-  function savePalette() { var name = newPalName.value.trim() || 'Без названия'; if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; } var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; }); var items = sorted.map(function(e) { return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label }; }); if (editingIndex >= 0) { var list = palettes[currentLayerForModal].list; if (editingIndex >= list.length) { toast('Ошибка: палитра не найдена'); return; } if (list[editingIndex].builtin) { toast('Нельзя редактировать встроенную палитру'); return; } list[editingIndex].name = name; list[editingIndex].items = items; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" обновлена'); closeForm(); } else { var newPal = { name: name, items: items, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" сохранена'); closeForm(); } }
+  function savePalette() { var name = newPalName.value.trim() || 'Без названия'; if (tempEntries.length === 0) { toast('Добавьте хотя бы одну запись'); return; } var sorted = tempEntries.slice().sort(function(a, b) { return b.val - a.val; }); var items = sorted.map(function(e) { return { v: e.val, r: [e.r.r, e.r.g, e.r.b], l: e.label }; }); if (editingIndex >= 0) { var list = palettes[currentLayerForModal].list; if (editingIndex >= list.length) { toast('Ошибка: палитра не найдена'); return; } if (list[editingIndex].builtin) { toast('Нельзя редактировать встроенную палитру'); return; } list[editingIndex].name = name; list[editingIndex].items = items; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (paletteAppliesNow()) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" обновлена'); closeForm(); } else { var newPal = { name: name, items: items, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (paletteAppliesNow()) { buildLegend(); forceRefresh(); } toast('Палитра "' + name + '" сохранена'); closeForm(); } }
   function exportPalette() { var layer = currentLayerForModal || S.layer; var list = palettes[layer].list; var idx = palettes[layer].activeIdx; if (!list || list.length === 0 || idx >= list.length) { toast('Нет палитры для экспорта'); return; } var pal = list[idx]; var content = generatePalFile(pal.items, pal.name, layer); var blob = new Blob([content], { type: 'text/plain;charset=utf-8' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = (pal.name || 'palette') + '.pal'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('Палитра "' + pal.name + '" экспортирована'); }
-  function generatePalFile(items, name, layer) { var sorted = items.slice().sort(function(a, b) { return a.v - b.v; }); var lines = []; lines.push('Product: ' + (layer === 'radar' ? 'BR' : (layer === 'sat' ? 'SAT' : 'WX'))); lines.push('Units: ' + (layer === 'sat' ? 'brightness' : 'dBZ')); lines.push('Scale: 1'); lines.push('Offset: 0'); lines.push('Step: 5'); lines.push('RF: 0 0 0'); lines.push(''); for (var i = 0; i < sorted.length; i++) { var p = sorted[i]; var r = p.r[0], g = p.r[1], b = p.r[2]; lines.push('Color: ' + p.v + ' ' + r + ' ' + g + ' ' + b); } return lines.join('\n'); }
-  function loadPaletteFromFile(file) { var reader = new FileReader(); reader.onload = function(e) { try { var content = e.target.result; var data = parsePaletteFile(content); if (data) { var name = file.name.replace(/\.[^.]+$/, '') || 'Загруженная'; var newPal = { name: name, items: data, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } toast('Палитра загружена'); } else { toast('Ошибка парсинга файла'); } } catch (err) { toast('Ошибка: ' + err.message); } }; reader.readAsText(file); }
+  function generatePalFile(items, name, layer) {
+    var sorted = items.slice().sort(function(a, b) { return a.v - b.v; });
+    var lines = [];
+    var prod = layer === 'radar' ? 'BR' : layer === 'sat' ? 'SAT' : layer === 'dop' ? 'VR' : layer === 'height' ? 'HGT' : 'WX';
+    var units = layer === 'sat' ? 'brightness' : layer === 'dop' ? 'm/s' : layer === 'height' ? 'km' : 'dBZ';
+    lines.push('Product: ' + prod);
+    lines.push('Units: ' + units); lines.push('Scale: 1'); lines.push('Offset: 0'); lines.push('Step: 5'); lines.push('RF: 0 0 0'); lines.push(''); for (var i = 0; i < sorted.length; i++) { var p = sorted[i]; var r = p.r[0], g = p.r[1], b = p.r[2]; lines.push('Color: ' + p.v + ' ' + r + ' ' + g + ' ' + b); } return lines.join('\n'); }
+  function loadPaletteFromFile(file) { var reader = new FileReader(); reader.onload = function(e) { try { var content = e.target.result; var data = parsePaletteFile(content); if (data) { var name = file.name.replace(/\.[^.]+$/, '') || 'Загруженная'; var newPal = { name: name, items: data, builtin: false }; palettes[currentLayerForModal].list.push(newPal); palettes[currentLayerForModal].activeIdx = palettes[currentLayerForModal].list.length - 1; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (paletteAppliesNow()) { buildLegend(); forceRefresh(); } toast('Палитра загружена'); } else { toast('Ошибка парсинга файла'); } } catch (err) { toast('Ошибка: ' + err.message); } }; reader.readAsText(file); }
   function parsePaletteFile(text) { try { var parsed = JSON.parse(text); if (Array.isArray(parsed) && parsed.length && parsed[0].v !== undefined && parsed[0].r && parsed[0].l) { return parsed; } } catch (e) {} var lines = text.split(/\r?\n/).filter(function(line) { return line.trim().length > 0; }); var items = []; var inTable = false; for (var i = 0; i < lines.length; i++) { var line = lines[i].trim(); if (/^ColorTable\s*\{/.test(line)) { inTable = true; continue; } if (/^\}/.test(line)) { inTable = false; continue; } if (!inTable) continue; var match = line.match(/Color\s*\[\s*([\d.]+)\s*\]\s*=\s*(rgb|gradient)\s*\(\s*([^)]+)\s*\)/i); if (match) { var v = parseFloat(match[1]); var type = match[2].toLowerCase(); var params = match[3].split(/\s*,\s*/).filter(function(s) { return s.length > 0; }); if (type === 'rgb' && params.length >= 3) { var r = parseInt(params[0]); var g = parseInt(params[1]); var b = parseInt(params[2]); if (!isNaN(r) && !isNaN(g) && !isNaN(b)) { items.push({ v: v, r: [r, g, b], l: '>= ' + v + ' dBZ' }); } } else if (type === 'gradient' && params.length >= 6) { var r2 = parseInt(params[1]), g2 = parseInt(params[2]), b2 = parseInt(params[3]); if (!isNaN(r2) && !isNaN(g2) && !isNaN(b2)) { items.push({ v: v, r: [r2, g2, b2], l: '>= ' + v + ' dBZ' }); } } } } if (items.length > 0) { items.sort(function(a, b) { return b.v - a.v; }); return items; } var colorLines = []; var product = null; for (var j = 0; j < lines.length; j++) { var line2 = lines[j].trim(); if (/^Product:/i.test(line2)) { product = line2; } if (/^Color:/i.test(line2)) { colorLines.push(line2); } } if (colorLines.length > 0) { var newItems = []; for (var k = 0; k < colorLines.length; k++) { var parts = colorLines[k].split(/\s+/); if (parts.length >= 5) { var val = parseFloat(parts[1]); var r3 = parseInt(parts[2]); var g3 = parseInt(parts[3]); var b3 = parseInt(parts[4]); if (!isNaN(val) && !isNaN(r3) && !isNaN(g3) && !isNaN(b3)) { newItems.push({ v: val, r: [r3, g3, b3], l: val + ' dBZ' }); } } } if (newItems.length > 0) { newItems.sort(function(a, b) { return b.v - a.v; }); return newItems; } } var csvItems = []; for (var m = 0; m < lines.length; m++) { var line3 = lines[m].trim(); var parts2 = line3.split(/\s*,\s*/); if (parts2.length >= 5) { var v2 = parseFloat(parts2[0]); if (isNaN(v2)) continue; var r4 = parseInt(parts2[1]), g4 = parseInt(parts2[2]), b4 = parseInt(parts2[3]); if (isNaN(r4) || isNaN(g4) || isNaN(b4)) continue; var label = parts2.slice(4).join(',').trim() || 'без метки'; csvItems.push({ v: v2, r: [r4, g4, b4], l: label }); } else { var m2 = line3.match(/^([\d.]+)\s+#([a-fA-F0-9]{6})\s+(.+)$/); if (m2) { var v3 = parseFloat(m2[1]); if (isNaN(v3)) continue; var rgb = hexToRgb('#' + m2[2]); if (!rgb) continue; csvItems.push({ v: v3, r: [rgb.r, rgb.g, rgb.b], l: m2[3].trim() }); } } } if (csvItems.length === 0) return null; csvItems.sort(function(a, b) { return b.v - a.v; }); return csvItems; }
 
   modalClose.addEventListener('click', closeModal);
@@ -2749,7 +2875,7 @@
   addEntryBtn.addEventListener('click', addEntry);
   document.querySelectorAll('#entry-val, #entry-label').forEach(function(inp) { inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') addEntry(); }); });
   savePaletteBtn.addEventListener('click', savePalette);
-  deletePaletteBtn.addEventListener('click', function() { var list = palettes[currentLayerForModal].list; var idx = palettes[currentLayerForModal].activeIdx; if (idx >= list.length) return; if (list[idx].builtin) { toast('Нельзя удалить встроенную палитру'); return; } if (confirm('Удалить активную палитру "' + list[idx].name + '"?')) { list.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (currentLayerForModal === S.layer) { buildLegend(); forceRefresh(); } } });
+  deletePaletteBtn.addEventListener('click', function() { var list = palettes[currentLayerForModal].list; var idx = palettes[currentLayerForModal].activeIdx; if (idx >= list.length) return; if (list[idx].builtin) { toast('Нельзя удалить встроенную палитру'); return; } if (confirm('Удалить активную палитру "' + list[idx].name + '"?')) { list.splice(idx, 1); if (palettes[currentLayerForModal].activeIdx >= list.length) palettes[currentLayerForModal].activeIdx = list.length - 1; if (palettes[currentLayerForModal].activeIdx < 0) palettes[currentLayerForModal].activeIdx = 0; savePalettesToStorage(currentLayerForModal); renderPaletteList(); if (paletteAppliesNow()) { buildLegend(); forceRefresh(); } } });
   $('btn-palettes').addEventListener('click', openModal);
 
   var opacitySlider = $('opacity-slider');
@@ -2960,8 +3086,8 @@
     if (S.layer === 'sat' && satProduct) {
       if (satProduct === 'height') {
         return { title: 'ВЫСОТА ВГО · BUFR (ДМРЛ)', grad: null, gradCaps: null,
-          rows: HEIGHT_DISPLAY_PALETTE.map(function(p) { return ['rgb(' + p[1].join(',') + ')', p[0] + '–' + (p[0] + 1) + ' км']; }),
-          notes: ['Фактическая палитра 4x4 · шаг 10 мин'] };
+          rows: activePaletteItems('height').map(function(p) { return ['rgb(' + p.r.join(',') + ')', p.l || (p.v + '–' + (p.v + 1) + ' км')]; }),
+          notes: ['Активная палитра · шаг 10 мин'] };
       }
       if (satProduct === 'composite') {
         return { title: 'COMPOSITE · ОТРАЖАЕМОСТЬ dBZ', grad: null, gradCaps: null,
@@ -3003,8 +3129,8 @@
       return out;
     }
     if (S.layer === 'dop') {
-      return { title: 'ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ', grad: DOP_DISPLAY_PALETTE.map(function(p) { return 'rgb(' + p[1].join(',') + ')'; }), gradCaps: ['−50 м/с · к радару', '+50 м/с · от радара'],
-        rows: DOP_DISPLAY_PALETTE.map(function(p) { return ['rgb(' + p[1].join(',') + ')', (p[0] > 0 ? '+' : '') + p[0] + ' м/с']; }),
+      return { title: 'ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ', grad: activePaletteItems('dop').map(function(p) { return 'rgb(' + p.r.join(',') + ')'; }), gradCaps: ['−50 м/с · к радару', '+50 м/с · от радара'],
+        rows: activePaletteItems('dop').map(function(p) { return ['rgb(' + p.r.join(',') + ')', p.l || ((p.v > 0 ? '+' : '') + p.v + ' м/с')]; }),
         notes: ['Шаг 5 м/с · ДМРЛ 4x4 · ' + DOP_HEIGHTS[dopHeightIdx].label] };
     }
     var items = getCurrentPaletteItems();
@@ -3283,6 +3409,7 @@
   }
 
   function doExport(fmt) {
+    if (fmt === 'gif') { doExportGif(); return; } /* анимация кадров — для всех слоёв */
     if (S.layer === 'dop' && fmt !== 'map' && fmt !== 'mapgeo') { toast('Для этого слоя доступен экспорт «Карта + слой»'); return; }
     if (fmt === 'csv' && S.layer === 'sat') { toast('CSV доступен только для радара/явлений'); return; }
     if (fmt === 'csv' && radarNcActive()) { toast('CSV с сырыми dBZ доступен в режиме rainradar (переключите источник в легенде)'); return; }
@@ -3387,6 +3514,96 @@
         } finally { finish(); }
       }, 30);
     });
+  }
+
+  /* ═══ Экспорт GIF: анимация последних кадров таймлайна ═══
+     Перебираем кадры S.frames (до 12), для каждого устанавливаем время, ждём
+     загрузки слоя и снимаем композит «карта + слой + легенда» через
+     renderCompositeToCanvas. Кодирование — gifenc (protected/gifenc.js). */
+  function doExportGif() {
+    if (typeof GIFENC === 'undefined') { toast('Кодировщик GIF ещё не загружен — повторите через секунду'); return; }
+    if (!S.frames || S.frames.length < 2) { toast('Недостаточно кадров для анимации'); return; }
+    if (S.layer !== 'sat' && !S.dbzVisible) { toast('Слой скрыт — включите 👁 для экспорта'); return; }
+    if (S.layer === 'sat' && satProduct && prodDef() && prodDef().kind === 'grid') { toast('GIF недоступен для сетки продуктов (CAPE/CIN/SCP)'); return; }
+    var btn = $('btn-download');
+    btn.classList.add('busy-export');
+    var finish = function() { btn.classList.remove('busy-export'); };
+    var frames = S.frames.slice(-12); /* последние 12 кадров, от старого к новому */
+    var savedTs = S.ts;
+    var GIF_W = 720, GIF_H = Math.min(900, Math.round(720 * innerHeight / Math.max(innerWidth, 1)));
+    var gif = GIFENC.GIFEncoder();
+    var idx = 0;
+    toast('🎞 GIF: кадр 1/' + frames.length + '…');
+    function applyFrame() {
+      if (S.layer === 'dop') nowcastApplyTime(true);
+      else if (S.layer === 'sat') { if (satProduct) prodWmsApply(true); else satApplyTime(true); }
+      else if (radarNcActive()) radarNcApply(true);
+      else schedRender();
+    }
+    function frameLayer() {
+      if (S.layer === 'dop') return nowcastLayer;
+      if (S.layer === 'sat') return satProduct ? prodWmsLayer : eumetsatLayer;
+      if (radarNcActive()) return radarNcLayer;
+      return null;
+    }
+    function frameReady(layer) {
+      if (layer) {
+        if (!layer._tiles) return false;
+        var tiles = layer._tiles, n = 0;
+        for (var k in tiles) {
+          var t = tiles[k];
+          if (!t.current) continue;
+          n++;
+          if (!t.loaded || !t.el || !t.el.complete || !t.el.naturalWidth) return false;
+        }
+        return n > 0;
+      }
+      var tiles = visTiles(), miss = 0;
+      for (var i = 0; i < tiles.length; i++) if (!S.cache.has(CK(tiles[i].x, tiles[i].y))) miss++;
+      return miss === 0;
+    }
+    function waitReady(cb) {
+      var t0 = Date.now();
+      (function poll() {
+        if (frameReady(frameLayer()) || Date.now() - t0 > 15000) { cb(); return; }
+        setTimeout(poll, 200);
+      })();
+    }
+    function capture() {
+      var rc = renderCompositeToCanvas();
+      var small = document.createElement('canvas');
+      small.width = GIF_W; small.height = GIF_H;
+      var sctx = small.getContext('2d');
+      sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = 'medium';
+      sctx.drawImage(rc.canvas, 0, 0, GIF_W, GIF_H);
+      var rgba = sctx.getImageData(0, 0, GIF_W, GIF_H).data;
+      var pal = GIFENC.quantize(rgba, 256);
+      var index = GIFENC.applyPalette(rgba, pal);
+      gif.writeFrame(index, GIF_W, GIF_H, { palette: pal, delay: 350 });
+    }
+    function next() {
+      if (idx >= frames.length) { done(); return; }
+      S.ts = frames[idx];
+      applyFrame();
+      waitReady(function() {
+        capture();
+        idx++;
+        toast('🎞 GIF: кадр ' + (idx + 1) + '/' + frames.length + '…');
+        setTimeout(next, 40);
+      });
+    }
+    function done() {
+      gif.finish();
+      var blob = new Blob([gif.bytes()], { type: 'image/gif' });
+      /* восстановить исходный кадр */
+      S.ts = savedTs;
+      applyFrame();
+      updHUD();
+      downloadBlob(blob, exportBaseName() + '_anim.gif');
+      finish();
+      toast('✅ GIF сохранён (' + frames.length + ' кадров)');
+    }
+    next();
   }
 
   /* Дропдаун экспорта: позиционируем fixed от кнопки — не обрезается скроллом #ctrl-scroll */
