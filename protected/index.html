@@ -44,15 +44,17 @@
       <button class="btn on" id="btn-channel">Канал</button>
       <div class="dropdown-menu" id="channel-dropdown"></div>
     </div>
+    <!-- Высота радиальной скорости (только в режиме «Доплер», источник 4x4).
+         ВАЖНО: обёртка находится ВНЕ #ctrl-scroll — иначе её абсолютный дропдаун
+         обрезается overflow-x:auto внутренней обёртки и пункты 2–4 км не видны. -->
+    <div id="dopheight-wrapper" style="display:none">
+      <button class="btn on" id="btn-dopheight">Высота: 1 км</button>
+      <div class="dropdown-menu" id="dopheight-dropdown"></div>
+    </div>
     <!-- Скролл вынесен на внутреннюю обёртку: #ctrl остаётся overflow:visible,
-         поэтому абсолютные дропдауны слоёв/каналов не обрезаются на мобильном.
+         поэтому абсолютные дропдауны слоёв/каналов/высоты не обрезаются на мобильном.
          Порядок кнопок — по частоте использования: частые слева, редкие в конце -->
     <div id="ctrl-scroll">
-      <!-- Высота радиальной скорости (только в режиме «Доплер», источник 4x4) -->
-      <div id="dopheight-wrapper" style="display:none">
-        <button class="btn on" id="btn-dopheight">Высота: 1 км</button>
-        <div class="dropdown-menu" id="dopheight-dropdown"></div>
-      </div>
       <div class="sep"></div>
       <button class="btn icon-btn" id="btn-refresh" title="Обновить"><span class="ic">↻</span></button>
       <button class="btn" id="spd">1×</button>
@@ -64,6 +66,7 @@
           <div class="dd-item" data-fmt="map" tabindex="0" role="button">🗺 Карта + слой + легенда (PNG)</div>
           <div class="dd-item" data-fmt="mapgeo" tabindex="0" role="button">📦 Карта + слой + легенда (ZIP + .pgw)</div>
           <div class="dd-item" data-fmt="png" tabindex="0" role="button">🖼 PNG — только слой</div>
+          <div class="dd-item" data-fmt="gif" tabindex="0" role="button">🎞 GIF — анимация кадров</div>
           <div class="dd-item" data-fmt="geo" tabindex="0" role="button">🌐 ZIP — слой + .pgw + мета</div>
           <div class="dd-item" data-fmt="csv" tabindex="0" role="button">📄 CSV — значения dBZ</div>
         </div>
@@ -131,7 +134,7 @@
   <div id="palette-modal" role="dialog" aria-modal="true" aria-label="Управление палитрами">
     <div class="modal-content">
       <h2><span>🎨 Управление палитрами</span><button class="modal-close" id="modal-close">&times;</button></h2>
-      <div class="modal-tabs"><button class="active" data-layer="radar">Отражаемость</button><button data-layer="wx">Явления</button><button data-layer="sat">Спутник</button></div>
+      <div class="modal-tabs"><button class="active" data-layer="radar">Отражаемость</button><button data-layer="wx">Явления</button><button data-layer="sat">Спутник</button><button data-layer="dop">Доплер</button><button data-layer="height">Высота ВГО</button></div>
       <!-- Выбор канала для палитр спутника (виден только на вкладке «Спутник») -->
       <div id="sat-pal-ch-row" style="display:none">
         <label for="sat-pal-ch">Канал</label>
@@ -191,7 +194,8 @@
       }).catch(function() {});
     }, 15000);
   </script>
+  <script src="gifenc.js"></script>
   <script src="script.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2d0eafa2ffcbe60',t:'MTc4NzA1NjEwMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2d0eafa2ffcbe60',t:'MTc4NzA1NjEwMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2d9ce1d0d4e8cea',t:'MTc4NzE0OTI5MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
 
