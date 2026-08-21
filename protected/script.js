@@ -46,7 +46,7 @@
      (проверено по пикселям) → показываем как есть; кастомные палитры пользователя —
      реколоризация через procQueue (обратное сопоставление цвет→dBZ). ═══ */
   var radarSource = 'nowcast';
-  try { var rsv = localStorage.getItem('radarSource'); if (rsv === 'rainradar' || rsv === 'nowcast') radarSource = rsv; } catch (e) {}
+  try { var rsv = localStorage.getItem('radarSource'); if (rsv === 'rainradar' || rsv === 'nowcast' || rsv === 'idark') radarSource = rsv; } catch (e) {}
   var radarSourceAuto = false; /* true = на rainradar ушли АВТОМАТИЧЕСКИ (из-за ошибок) */
   /* Данные nowcast для отражаемости: ДМРЛ-станции РФ либо композит FMI (Европа).
      Переключатель в легенде: покрытие у них разное, пусть выбирает пользователь. */
@@ -1088,8 +1088,8 @@
     satPrefetchCancel(); /* активный продукт сменился — пересобрать план прогрева */
     if (prev) prodExit();
     if (id) {
-      prodEnter();
-      toast('Продукт: ' + prodDef().label);
+      if (radarSource === 'idark' && id === 'height') { idarkSync(); toast('Высота ВГО (idark 4x4)'); }
+      else { prodEnter(); toast('Продукт: ' + prodDef().label); }
     } else {
       /* возврат к каналу EUMETSAT */
       S.manualTime = false; S.ts = nowTs(); buildFrames(); updHUD();
@@ -1243,7 +1243,7 @@
   }
 
   var renderPend = false;
-  function schedRender() { if (!renderPend) { renderPend = true; requestAnimationFrame(doRender); } }
+  function schedRender() { if (idarkActive()) idarkApplyTime(); if (!renderPend) { renderPend = true; requestAnimationFrame(doRender); } }
   function doRender() {
     renderPend = false;
     /* DPR-масштаб: рисуем в CSS-пикселях, физически — в device-пикселях (чёткость на retina) */
@@ -1930,8 +1930,15 @@
     radarSourceAuto = !!auto && src === 'rainradar';
     try { localStorage.setItem('radarSource', src); } catch (e) {}
     if (S.layer !== 'radar' && S.layer !== 'wx') { buildLegend(); return; }
-    if (src === 'nowcast') {
+    if (src === 'idark') {
+      radarNcRemove();
+      fadeCanvas(true);
+      idarkRemove();
+      if (!idark.ready) idarkInit(); else idarkSync();
+      if (!auto) toast((S.layer === 'wx' ? 'Явления' : 'Радар') + ': idark 4x4');
+    } else if (src === 'nowcast') {
       radarNcFails = 0; radarNcErr = null;
+      idarkRemove();
       fadeCanvas(false); /* канвас не нужен — рисует WMS-слой */
       radarNcApply(true);
       if (!auto) toast((S.layer === 'wx' ? 'Явления' : 'Радар') + ': 4x4 (ДМРЛ)');
@@ -1980,6 +1987,7 @@
     }
   });
   function forceRefresh() {
+    if (idarkActive()) { idarkApplyTime(true); return; } /* idark: перезагрузить кадр */
     if (S.layer === 'sat') { satRecolorCache.clear(); satApplyTime(true); return; } /* смена палитры спутника → перекрасить тайлы */
     if (radarNcActive()) { radarRecolorCache.clear(); radarNcApply(true); return; } /* nowcast-радар: пересоздать слой (палитра/кадр) */
     if (S.layer === 'dop') { dopRecolorCache.clear(); nowcastApplyTime(true); return; } /* доплер: сбросить кэш перекраски и пересоздать слой */
@@ -2011,6 +2019,8 @@
   /* Прогресс и thumb — через transform (scaleX/translateX), а не left/width: без layout-перерасчётов */
   function updThumb() { var f = S.frames; if (!f.length) return; var r = f[f.length - 1] - f[0], p = r === 0 ? 0 : Math.max(0, Math.min(1, (S.ts - f[0]) / r)); var tw = $('track').offsetWidth; $('tfill').style.transform = 'scaleX(' + p + ')'; $('tthumb').style.transform = 'translate(' + (p * tw) + 'px, -50%) translateX(-50%)'; }
   function buildFrames() {
+    /* idark 4x4: кадры по манифесту (моменты продукта/охвата) */
+    if (idarkActive() && idark.ready) { idarkBuildFrames(); return; }
     /* Работает для радара И спутника: сетка времени задаётся stepSec()/histSec() */
     var mx = nowTs(), from = mx - histSec(), frames = [];
     for (var t = from; t <= mx; t += stepSec()) frames.push(t);
@@ -2125,8 +2135,8 @@
       /* Доплер: у 4x4 есть история (Extent) — таймлайн работает, LIVE без TIME */
       S.manualTime = false; S.ts = nowTs();
       buildFrames(); updHUD();
-      dopStart();
-      toast('🌀 Доплер: радиальная скорость ДМРЛ (4x4)');
+      if (radarSource === 'idark') { idarkSync(); toast('🌀 Доплер: радиальная скорость (idark 4x4)'); }
+      else { dopStart(); toast('🌀 Доплер: радиальная скорость ДМРЛ (4x4)'); }
       schedRender(); /* чип обновится в doRender */
       applyDbzUI();
       buildLegend(); hidePopup(); $('hover-indicator').style.display = 'none'; if (crosshairMode) requestAnimationFrame(updateCrosshair); /* прицел пересчитывается под новый слой */
@@ -2171,7 +2181,8 @@
       S.pxIndex = 1; S.px = S.pxLevels[S.pxIndex]; updatePxLabel();
       S.cache.clear(); S.pending.clear(); S.failed.clear();
       buildFrames();
-      if (radarNcActive()) { fadeCanvas(false); radarNcApply(true); } /* dBZ/ОЯ с nowcast: канвас не нужен */
+      if (idarkActive()) { idarkSync(); } /* idark 4x4: кадр-оверлей */
+      else if (radarNcActive()) { fadeCanvas(false); radarNcApply(true); } /* dBZ/ОЯ с nowcast: канвас не нужен */
       else forceRefresh();
     }
     applyDbzUI();
@@ -2256,7 +2267,8 @@
     el.appendChild(n2);
   }
   function setLegendTitle(t) { var el = $('ltitle'); if (el.textContent !== t) { el.textContent = t; retrig(el, 'title-swap'); } }
-  function buildLegend() { 
+  function buildLegend() {
+    if (idarkActive() && idark.ready) { idarkLegend(); return; }
     var el = $('lbody'); el.innerHTML = ''; 
     /* ─── Легенды грозовых продуктов (раздел «Спутник») ─── */
     if (S.layer === 'sat' && satProduct) {
@@ -2469,9 +2481,9 @@
     if (isRadarLegend) {
       /* Переключатель источника радара: nowcast (ДМРЛ, основной) ↔ rainradar (запасной) */
       var srcBtn = document.createElement('button');
-      srcBtn.className = 'btn mini-btn' + (radarSource === 'nowcast' ? ' on' : '');
-      srcBtn.textContent = 'Источник: ' + (radarSource === 'nowcast' ? '4x4 (ДМРЛ)' : 'rainradar');
-      srcBtn.addEventListener('click', function() { setRadarSource(radarSource === 'nowcast' ? 'rainradar' : 'nowcast', false); });
+      srcBtn.className = 'btn mini-btn' + (radarSource !== 'rainradar' ? ' on' : '');
+      srcBtn.textContent = 'Источник: ' + (radarSource === 'nowcast' ? '4x4 (ДМРЛ)' : radarSource === 'idark' ? 'idark 4x4' : 'rainradar');
+      srcBtn.addEventListener('click', function() { var nx = radarSource === 'nowcast' ? 'idark' : (radarSource === 'idark' ? 'rainradar' : 'nowcast'); setRadarSource(nx, false); });
       el.appendChild(srcBtn);
       if (radarSource === 'nowcast' && S.layer === 'radar') {
         /* Выбор данных nowcast: станции ДМРЛ РФ или композит FMI (Европа) */
@@ -2802,7 +2814,7 @@
         '<div class="popup-meta">' + meta + '</div>' + closeBtn;
     });
   }
-  map.on('click', function(e) { if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint; var stLtg = ltgFindNear(p.x, p.y); if (stLtg) { ltgShowPopup(stLtg, p.x, p.y); return; } /* молнии кликабельны поверх ЛЮБОГО слоя, включая спутник */ var ll = crosshairMode ? map.containerPointToLatLng(L.point(p.x, p.y)) : e.latlng; if (S.layer === 'sat' && satProduct === 'height') { heightShowPopup(ll, p.x, p.y); return; } /* высота ВГО в точке */ if (S.layer === 'sat') return; if (S.layer === 'dop') { dopShowPopup(ll, p.x, p.y); return; } /* доплер: скорость в точке */ if (S.layer === 'wx' && radarNcActive()) { /* БЛОК A: тип явления в точке — через GetFeatureInfo */ wxNcShowPopup(ll, p.x, p.y); return; } var block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
+  map.on('click', function(e) { if (idarkActive() && idark.ready) { idarkShowPopup(e); return; } if (S.ruler.active) return; var p = crosshairMode ? { x: innerWidth / 2, y: innerHeight / 2 } : e.containerPoint; var stLtg = ltgFindNear(p.x, p.y); if (stLtg) { ltgShowPopup(stLtg, p.x, p.y); return; } /* молнии кликабельны поверх ЛЮБОГО слоя, включая спутник */ var ll = crosshairMode ? map.containerPointToLatLng(L.point(p.x, p.y)) : e.latlng; if (S.layer === 'sat' && satProduct === 'height') { heightShowPopup(ll, p.x, p.y); return; } /* высота ВГО в точке */ if (S.layer === 'sat') return; if (S.layer === 'dop') { dopShowPopup(ll, p.x, p.y); return; } /* доплер: скорость в точке */ if (S.layer === 'wx' && radarNcActive()) { /* БЛОК A: тип явления в точке — через GetFeatureInfo */ wxNcShowPopup(ll, p.x, p.y); return; } var block = getBlockAt(p.x, p.y); block ? showPopup(block, p.x, p.y) : hidePopup(); });
 
   var modal = $('palette-modal'), modalClose = $('modal-close'), modalTabs = document.querySelectorAll('.modal-tabs button'), paletteListContainer = $('palette-list-container'), loadPaletteBtn = $('load-palette-btn'), fileInput = $('file-input'), createPaletteBtn = $('create-palette-btn'), deletePaletteBtn = $('delete-palette-btn'), exportPaletteBtn = $('export-palette-btn'), createForm = $('create-form'), newPalName = $('new-pal-name'), entryVal = $('entry-val'), entryColor = $('entry-color'), entryLabel = $('entry-label'), addEntryBtn = $('add-entry-btn'), entriesList = $('entries-list'), savePaletteBtn = $('save-palette-btn'), cancelCreateBtn = $('cancel-create-btn');
   var currentLayerForModal = 'radar'; var tempEntries = []; var editingIndex = -1; var editingEntryIndex = -1;
@@ -3298,6 +3310,7 @@
       octx.restore();
       missing = rc.missing; total = rc.total;
     }
+    if (idarkActive() && idark.overlay) idarkDrawToCtx(octx); /* idark-кадр — в композит */
     if (ltg.on && ltg.strikes.length) drawLtgToCtx(octx); /* молнии — в пиксели композита */
     /* Легенда — последней, поверх базы/подложки/данных (только в композите) */
     try { drawLegendToCanvas(octx); } catch (e) { console.warn('[export] легенда не отрисована:', e); }
@@ -3520,6 +3533,45 @@
      Перебираем кадры S.frames (до 12), для каждого устанавливаем время, ждём
      загрузки слоя и снимаем композит «карта + слой + легенда» через
      renderCompositeToCanvas. Кодирование — gifenc (protected/gifenc.js). */
+  /* Ordered (Bayer 4×4) дизеринг для GIF: скрывает полосатость градиентов,
+     даёт ровное «фотографическое» зерно без шума Floyd–Steinberg.
+     Поиск ближайшего цвета ускорен таблицей 32³ (O(1) на пиксель). */
+  var GIF_BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  var GIF_DITHER_AMP = 7; /* амплитуда: скрывает полосы, зерно почти незаметно */
+  function gifDitherIndexes(rgba, palette, w, h) {
+    var L = 32;
+    var table = new Uint8Array(L * L * L);
+    for (var ri = 0; ri < L; ri++) {
+      var r0 = Math.round(ri * 255 / (L - 1));
+      for (var gi = 0; gi < L; gi++) {
+        var g0 = Math.round(gi * 255 / (L - 1));
+        for (var bi = 0; bi < L; bi++) {
+          var b0 = Math.round(bi * 255 / (L - 1));
+          var best = 0, bd = 1e18;
+          for (var p = 0; p < palette.length; p++) {
+            var dr = palette[p][0] - r0, dg = palette[p][1] - g0, db = palette[p][2] - b0;
+            var d = dr * dr + dg * dg + db * db;
+            if (d < bd) { bd = d; best = p; }
+          }
+          table[(ri * L + gi) * L + bi] = best;
+        }
+      }
+    }
+    var index = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      var by = y & 3, row = y * w;
+      for (var x = 0; x < w; x++) {
+        var pi = (row + x) * 4;
+        var d = (GIF_BAYER[by * 4 + (x & 3)] / 16 - 0.5) * GIF_DITHER_AMP;
+        var rk = Math.max(0, Math.min(L - 1, Math.round((rgba[pi] + d) / 255 * (L - 1))));
+        var gk = Math.max(0, Math.min(L - 1, Math.round((rgba[pi + 1] + d) / 255 * (L - 1))));
+        var bk = Math.max(0, Math.min(L - 1, Math.round((rgba[pi + 2] + d) / 255 * (L - 1))));
+        index[row + x] = table[(rk * L + gk) * L + bk];
+      }
+    }
+    return index;
+  }
+
   function doExportGif() {
     if (typeof GIFENC === 'undefined') { toast('Кодировщик GIF ещё не загружен — повторите через секунду'); return; }
     if (!S.frames || S.frames.length < 2) { toast('Недостаточно кадров для анимации'); return; }
@@ -3528,9 +3580,9 @@
     var btn = $('btn-download');
     btn.classList.add('busy-export');
     var finish = function() { btn.classList.remove('busy-export'); };
-    var frames = S.frames.slice(-12); /* последние 12 кадров, от старого к новому */
+    var frames = S.frames.slice(-10); /* последние 10 кадров (баланс размера и качества) */
     var savedTs = S.ts;
-    var GIF_W = 720, GIF_H = Math.min(900, Math.round(720 * innerHeight / Math.max(innerWidth, 1)));
+    var GIF_W = 960, GIF_H = Math.min(1200, Math.round(960 * innerHeight / Math.max(innerWidth, 1)));
     var gif = GIFENC.GIFEncoder();
     var idx = 0;
     toast('🎞 GIF: кадр 1/' + frames.length + '…');
@@ -3574,12 +3626,12 @@
       var small = document.createElement('canvas');
       small.width = GIF_W; small.height = GIF_H;
       var sctx = small.getContext('2d');
-      sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = 'medium';
+      sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = 'high';
       sctx.drawImage(rc.canvas, 0, 0, GIF_W, GIF_H);
       var rgba = sctx.getImageData(0, 0, GIF_W, GIF_H).data;
       var pal = GIFENC.quantize(rgba, 256);
-      var index = GIFENC.applyPalette(rgba, pal);
-      gif.writeFrame(index, GIF_W, GIF_H, { palette: pal, delay: 350 });
+      var index = gifDitherIndexes(rgba, pal, GIF_W, GIF_H); /* Bayer-дизеринг — без полосатости */
+      gif.writeFrame(index, GIF_W, GIF_H, { palette: pal, delay: 320 });
     }
     function next() {
       if (idx >= frames.length) { done(); return; }
@@ -3777,6 +3829,168 @@
   map.on('move moveend zoomend', function() { if (crosshairMode) updateCrosshair(); });
   window.addEventListener('resize', function() { if (crosshairMode) updateCrosshair(); });
 
+  /* ═══════════ IDARK 4x4: индексные кадры (idarkmeteo.host) ═══════════
+     Кадры цельные (на момент), индексные PNG: встроенная палитра PNG = palettes.json
+     (проверено 19/19). Показываем как L.ImageOverlay, геопривязанный к mosaic.box
+     (EPSG:3857). Таймлайн — моменты манифеста для продукта слоя. ═══════════ */
+  var idark = { manifest: null, palettes: null, overlay: null, canvas: null,
+    frames: [], tsCur: -1, ready: false, err: null, product: 'dbz', mosaic: 'europe' };
+
+  function idarkActive() {
+    return radarSource === 'idark' &&
+      (S.layer === 'radar' || S.layer === 'dop' || (S.layer === 'sat' && satProduct === 'height'));
+  }
+  function idarkProductForLayer() {
+    if (S.layer === 'dop') return 'velocity';
+    if (S.layer === 'sat' && satProduct === 'height') return 'height';
+    return 'dbz';
+  }
+  function idarkBox() {
+    var m = idark.manifest && idark.manifest.mosaics[idark.mosaic];
+    if (!m) return null;
+    var b = m.box;
+    var sw = L.CRS.EPSG3857.unproject(L.point(b[0], b[1]));
+    var ne = L.CRS.EPSG3857.unproject(L.point(b[2], b[3]));
+    return L.latLngBounds(sw, ne);
+  }
+  function idarkInit() {
+    return Promise.all([
+      fetch('/api/idark?manifest=1').then(function (r) { return r.json(); }),
+      fetch('/api/idark?palettes=1').then(function (r) { return r.json(); })
+    ]).then(function (res) {
+      idark.manifest = res[0]; idark.palettes = res[1];
+      idark.ready = true;
+      idarkSync();
+    }).catch(function () { idark.err = 'недоступен'; });
+  }
+  function idarkSync() {
+    if (!idarkActive() || !idark.ready) return;
+    idark.product = idarkProductForLayer();
+    idarkBuildFrames();
+    idarkApplyTime(true);
+    buildLegend();
+  }
+  function idarkBuildFrames() {
+    var product = idarkProductForLayer();
+    var moments = [];
+    (idark.manifest.moments || []).forEach(function (m) {
+      if (m.have && m.have[product] && m.have[product].indexOf(idark.mosaic) >= 0) moments.push(m.t);
+    });
+    idark.frames = moments.map(function (t) { return Date.parse(t + 'Z') / 1000; }).sort(function (a, b) { return a - b; });
+    S.frames = idark.frames;
+    buildFramesUI();
+  }
+  function idarkTimeToPath(ts) {
+    var d = new Date(ts * 1000);
+    function p(n) { return n < 10 ? '0' + n : '' + n; }
+    return {
+      date: '' + d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()),
+      time: p(d.getUTCHours()) + p(d.getUTCMinutes())
+    };
+  }
+  function idarkApplyTime(force) {
+    if (!idarkActive() || !idark.ready || !idark.frames.length) return;
+    var ts = S.ts;
+    if (!force && ts === idark.tsCur) return;
+    var best = null;
+    for (var i = 0; i < idark.frames.length; i++) { if (idark.frames[i] <= ts) best = idark.frames[i]; }
+    if (best == null) best = idark.frames[0];
+    idark.tsCur = best;
+    var path = idarkTimeToPath(best);
+    var url = '/api/idark?product=' + idark.product + '&mosaic=' + idark.mosaic + '&date=' + path.date + '&time=' + path.time;
+    $('pulse').classList.add('busy');
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function () { idarkShow(img); };
+    img.onerror = function () { idark.err = 'кадр недоступен'; $('pulse').classList.remove('busy'); };
+    img.src = url;
+  }
+  function idarkShow(img) {
+    var W = img.width, H = img.height;
+    if (!idark.canvas) idark.canvas = document.createElement('canvas');
+    idark.canvas.width = W; idark.canvas.height = H;
+    var ctx = idark.canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    /* Фон (чёрный индекс 0 во встроенной палитре) — в прозрачный */
+    try {
+      var idata = ctx.getImageData(0, 0, W, H), d = idata.data;
+      for (var i = 0; i < d.length; i += 4) {
+        if (d[i] < 8 && d[i + 1] < 8 && d[i + 2] < 8) d[i + 3] = 0;
+      }
+      ctx.putImageData(idata, 0, 0);
+    } catch (e) {}
+    if (idark.overlay && map.hasLayer(idark.overlay)) map.removeLayer(idark.overlay);
+    var box = idarkBox();
+    if (!box) { $('pulse').classList.remove('busy'); return; }
+    idark.overlay = L.imageOverlay(idark.canvas.toDataURL('image/png'), box, { opacity: 0.85, zIndex: 11, interactive: false });
+    idark.overlay.addTo(map);
+    $('pulse').classList.remove('busy');
+    buildLegend();
+  }
+  function idarkShowPopup(e) {
+    if (!idark.overlay || !idark.canvas) return;
+    var box = idarkBox();
+    if (!box || !box.contains(e.latlng)) return;
+    var f = L.CRS.EPSG3857.project(e.latlng);
+    var m = idark.manifest.mosaics[idark.mosaic];
+    var x = Math.round((f.x - m.box[0]) / (m.box[2] - m.box[0]) * (idark.canvas.width - 1));
+    var y = Math.round((m.box[3] - f.y) / (m.box[3] - m.box[1]) * (idark.canvas.height - 1));
+    x = Math.max(0, Math.min(idark.canvas.width - 1, x));
+    y = Math.max(0, Math.min(idark.canvas.height - 1, y));
+    var px = idark.canvas.getContext('2d').getImageData(x, y, 1, 1).data;
+    if (px[3] < 20) { hidePopup(); return; }
+    var bands = idark.palettes[idark.product].bands;
+    var best = null, bd = 1e9;
+    for (var i = 0; i < bands.length; i++) {
+      var b2 = bands[i].rgb;
+      var dr = px[0] - b2[0], dg = px[1] - b2[1], db = px[2] - b2[2];
+      var dist = dr * dr + dg * dg + db * db;
+      if (dist < bd) { bd = dist; best = bands[i]; }
+    }
+    if (!best || bd > 4000) { hidePopup(); return; }
+    var val, label;
+    if (idark.product === 'dbz') { val = best.lo; label = val.toFixed(1) + ' dBZ'; }
+    else if (idark.product === 'velocity') { val = (best.lo + best.hi) / 2; label = (val > 0 ? '+' : '') + val.toFixed(1) + ' м/с'; }
+    else { val = best.lo; label = val.toFixed(1) + ' км'; }
+    var t = new Date(idark.tsCur * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+    var closeBtn = '<span class="popup-close" onclick="document.getElementById(\'pixel-popup\').style.display=\'none\'">✕</span>';
+    popupEl.innerHTML = '<div class="popup-header"><div class="popup-swatch" style="background:rgb(' + px[0] + ',' + px[1] + ',' + px[2] + ')"></div><div class="popup-label">' + label + '</div></div>' +
+      '<div class="popup-meta">4x4 (idark) · ' + t + ' МСК<br>Диапазон: ' + best.lo + '…' + best.hi + '</div>' + closeBtn;
+    placePopup(e.containerPoint.x, e.containerPoint.y);
+  }
+  function idarkLegend() {
+    var el = $('lbody'); el.innerHTML = '';
+    setLegendTitle(idark.product === 'dbz' ? 'ОТРАЖАЕМОСТЬ dBZ · 4x4 (IDARK)' :
+      (idark.product === 'velocity' ? 'ДОПЛЕР · РАДИАЛЬНАЯ СКОРОСТЬ' : 'ВЫСОТА ВГО · 4x4'));
+    var pal = idark.palettes[idark.product];
+    (pal.bands || []).forEach(function (b, i) {
+      var row = document.createElement('div'); row.className = 'li'; row.style.setProperty('--i', Math.min(i, 14));
+      var sq = document.createElement('div'); sq.className = 'lsq'; sq.style.background = 'rgb(' + b.rgb.join(',') + ')';
+      var tt = document.createElement('span');
+      var unit = idark.product === 'dbz' ? ' dBZ' : (idark.product === 'velocity' ? ' м/с' : ' км');
+      tt.textContent = b.lo + '…' + b.hi + unit;
+      row.appendChild(sq); row.appendChild(tt); el.appendChild(row);
+    });
+    var note = document.createElement('div'); note.className = 'li legend-note';
+    note.textContent = 'Индексные кадры ДМРЛ · idarkmeteo · клик — значение в точке';
+    el.appendChild(note);
+    appendLtgLegend(el);
+  }
+  function idarkDrawToCtx(octx) {
+    if (!idark.overlay || !idark.canvas) return 0;
+    var box = idarkBox();
+    if (!box) return 0;
+    var sw = map.latLngToContainerPoint(box.getSouthWest());
+    var ne = map.latLngToContainerPoint(box.getNorthEast());
+    try { octx.save(); octx.globalAlpha = 0.85; octx.drawImage(idark.canvas, sw.x, ne.y, ne.x - sw.x, sw.y - ne.y); octx.restore(); } catch (e) { return 0; }
+    return 1;
+  }
+  function idarkRemove() {
+    if (idark.overlay && map.hasLayer(idark.overlay)) map.removeLayer(idark.overlay);
+    idark.overlay = null;
+  }
+
   window.closeModal = closeModal; window.openModal = openModal; window.setLayer = setLayer;
+  if (radarSource === 'idark') idarkInit(); /* idark 4x4 источник — загрузить манифест+палитры */
   console.log('Tatmeteo загружен. 1x1 км интерполяция, EUMETSAT WMS и обновленные палитры активны.');
 })();
