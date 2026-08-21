@@ -6,6 +6,10 @@
   },
   "rewrites": [
     {
+      "source": "/api/idark",
+      "destination": "/api/idarkProxy"
+    },
+    {
       "source": "/api/auth",
       "destination": "/api/authgrhouhfiesuhghth"
     },
