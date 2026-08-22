@@ -1,8 +1,16 @@
 {
-  "name": "radar-vercel",
-  "version": "1.0.0",
+  "name": "tatmeteo-radar",
+  "version": "1.1.0",
+  "description": "Tatmeteo — Радар ДМРЛ, спутник EUMETSAT, грозопеленгация и прогнозирование",
   "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
   "dependencies": {
-    "@upstash/redis": "^1.28.4"
+    "@upstash/redis": "^1.28.4",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2"
   }
 }
